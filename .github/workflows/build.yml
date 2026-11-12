@@ -1,10 +1,10 @@
 name: build
 
 # 按 tag（v*）、推 main 或手动触发，整份镜像在 GitHub 的机器上编出来：
-# 取上游 kirklin/skyward v0.2.0 源码 → 打本仓库的补丁 → 交叉编译 skyward 与
-# system-init → 用 skyward-pack 从小米服务器取 nuwa 原厂 recovery（只读这一个
-# 分区所占的部分，并按 devices/nuwa.toml 里的 SHA-256 核对）→ 在原厂 recovery
-# 上打包成整份镜像，带自己的 AVB 头尾。
+# 取上游 kirklin/skyward v0.2.0 源码 → 打补丁（pudding 那份 + 本仓库的诊断补丁）
+# → 交叉编译 skyward 与 system-init → 用 skyward-pack 从小米服务器取 nuwa 原厂
+# recovery（只读这一个分区所占的部分，并按 devices/nuwa.toml 里的 SHA-256 核对）
+# → 在原厂 recovery 上打包成整份镜像，带自己的 AVB 头尾。
 
 on:
   push:
@@ -59,6 +59,13 @@ jobs:
           patch -p1 --batch --no-backup-if-mismatch < ../skyward.patch
           if find . -name '*.rej' | head -1 | grep -q .; then
             echo "补丁有冲突："
+            find . -name '*.rej' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
+            exit 1
+          fi
+          # 本仓库的补丁：日志落到 /metadata（跨重启可读），一步失败只记不中断服务链
+          patch -p1 --batch --no-backup-if-mismatch < ../patches/skyward-nuwa-extra.patch
+          if find . -name '*.rej' | head -1 | grep -q .; then
+            echo "本仓库的补丁有冲突："
             find . -name '*.rej' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
             exit 1
           fi
