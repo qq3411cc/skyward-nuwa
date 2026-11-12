@@ -57,6 +57,8 @@ skyward-nuwa-20261112-0.2.41-OS4.0.5.0.XPCCNXM.img
 sha256 706379de5bf700ca5dde05a53e79a18304ced9cdb50f7a22e9111f12537ba74d
 ```
 
+以后重新构建的镜像哈希会变（每次构建的字节不完全一致），以该 Release 里的 `SHA256SUMS` 为准。
+
 - 需要已解锁 BL
 - 只动 recovery 分区，`boot` / `init_boot` / `vendor_boot` 不碰
 - 出问题刷回原厂或第三方 recovery 即可恢复
@@ -113,6 +115,31 @@ target/release/skyward-pack recovery \
 python3 tools/payload_get.py "<ota.zip 直链>" recovery recovery_stock.img \
   --sha256 04431f150316d32fc5fd38ac8caf7e48ee271fa47cd23a28ad7e067e5fcde273
 ```
+
+## 上游更新了怎么办
+
+本仓库不跟上游的分支，跟的是**一个钉死的版本**，写在 `upstream.json`：
+
+```json
+{ "repository": "kirklin/skyward", "tag": "v0.2.0", "tarball_sha256": "f46e0da3…" }
+```
+
+构建流程只读这个文件，不硬写版本号（源码包哈希对不上会直接失败）。上游一动，两条路跟上：
+
+**自动**：`.github/workflows/sync-upstream.yml` 每天 04:00 查一次上游 tag。有新版本就下源码，先把「pudding 补丁 + `patches/skyward-nuwa-extra.patch`」试打一遍：
+
+- 打得进去 → 改 `upstream.json` 的 tag 与源码包哈希、提交、触发构建，直接出新包
+- 打不进去 → 开一个 issue，把失败的 hunk 列出来，等人合（补丁按版本钉死，冲突是常态）
+
+**手动**：
+
+```sh
+scripts/sync-upstream.sh                  # 查最新，与钉的比
+scripts/sync-upstream.sh v0.3.0           # 指定 tag 试打，报冲突位置
+scripts/sync-upstream.sh v0.3.0 --write   # 打得进去就写回 upstream.json
+```
+
+合完冲突后重出补丁的办法见 `docs/开发记录.md`。
 
 ## 用 GitHub Actions 构建
 

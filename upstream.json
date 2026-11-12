@@ -1,0 +1,6 @@
+{
+  "repository": "kirklin/skyward",
+  "tag": "v0.2.0",
+  "tarball_sha256": "f46e0da3703af12c0c0182d46a60e757a357aed8ae5b9582f637ed23f121d68c",
+  "note": "构建与上游同步都以这个文件为准：tag 是拿来编的上游版本，tarball_sha256 是它的源码包哈希（空字符串表示不核对）。同步流程只会改这个文件里的 tag 与哈希。"
+}

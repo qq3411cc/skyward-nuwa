@@ -1,0 +1,135 @@
+name: sync-upstream
+
+# 上游 kirklin/skyward 出了新 tag 时，把本仓库的补丁链带过去：
+#   1. 查上游最新的 tag，与 upstream.json 里钉的比
+#   2. 一样就结束
+#   3. 不一样就下新源码，先用 --dry-run 试打「pudding 补丁 + 本仓库补丁」
+#   4. 都打得进去：改 upstream.json 的 tag 与源码包哈希，提交推 main，再手动触发 build
+#   5. 有冲突：开一个 issue 把失败的 hunk 列出来，运行标红，等人合
+#
+# 上游的补丁链是按版本钉死的，冲突是常态而不是异常：这里的价值是「上游一动就有人
+# 告诉你，并且把冲突位置贴出来」，能自动过的就直接出包。
+
+on:
+  schedule:
+    - cron: '0 20 * * *'      # 每天 04:00（Asia/Shanghai）
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '指定要同步到的上游 tag（留空则查最新）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 工具
+        run: sudo apt-get update && sudo apt-get install -y patch jq
+
+      - name: 查上游最新 tag
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WANTED: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          PINNED=$(jq -r .tag upstream.json)
+          if [ -n "$WANTED" ]; then
+            NEW="$WANTED"
+          else
+            NEW=$(gh api repos/kirklin/skyward/tags --paginate \
+              -q '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          fi
+          echo "钉的：$PINNED   上游最新：$NEW"
+          echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          if [ "$PINNED" = "$NEW" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 取新源码并试打补丁
+        if: steps.upstream.outputs.changed == 'true'
+        id: try
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.upstream.outputs.new }}"
+          URL="https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/$TAG"
+          curl -fL --retry 3 -o upstream.tar.gz "$URL"
+          SHA=$(sha256sum upstream.tar.gz | cut -d' ' -f1)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          mkdir -p src
+          tar xzf upstream.tar.gz -C src --strip-components=1
+          cd src
+
+          PATCH_URL=https://raw.githubusercontent.com/mariusarva/skyward-pudding/9ab25b7802466e1fae0decb1b4d3f133540be1c3/patches/skyward-pudding-v0.2.41.patch
+          PATCH_SHA=12e6d543dc23b60a7478211fe000cd3e8f487fbcb3bea460618beb501b534f0c
+          curl -fL --retry 3 -o ../skyward.patch "$PATCH_URL"
+          echo "$PATCH_SHA  ../skyward.patch" | sha256sum -c -
+
+          FAILED=0
+          for P in ../skyward.patch ../patches/skyward-nuwa-extra.patch; do
+            echo "== 试打 $(basename "$P")"
+            if ! patch -p1 --batch --dry-run --no-backup-if-mismatch < "$P" > /tmp/dry.log 2>&1; then
+              echo "!! 与 $TAG 冲突："
+              grep -E 'FAILED|Hunk|patching file' /tmp/dry.log | head -60 || true
+              FAILED=1
+              continue
+            fi
+            patch -p1 --batch --no-backup-if-mismatch < "$P" > /dev/null
+          done
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
+
+      - name: 打得进去就更新 pin 并出包
+        if: steps.upstream.outputs.changed == 'true' && steps.try.outputs.failed == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.upstream.outputs.new }}"
+          SHA="${{ steps.try.outputs.sha }}"
+          jq --arg t "$TAG" --arg s "$SHA" '.tag = $t | .tarball_sha256 = $s' upstream.json > upstream.json.new
+          mv upstream.json.new upstream.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add upstream.json
+          git commit -m "sync: 上游 ${{ steps.upstream.outputs.pinned }} → $TAG（补丁链原样打得进去）"
+          git push
+          # GITHUB_TOKEN 推的提交不会触发别的 workflow，所以显式叫一次构建
+          gh workflow run build.yml --ref main
+          echo "已更新 pin 并触发构建"
+
+      - name: 有冲突就开 issue 等人合
+        if: steps.upstream.outputs.changed == 'true' && steps.try.outputs.failed != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.upstream.outputs.new }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BODY=$(printf '%s\n' \
+            "上游出了 \`$TAG\`，本仓库的补丁链（pudding 补丁 + \`patches/skyward-nuwa-extra.patch\`）打不进去。" \
+            "" \
+            "处理办法：" \
+            "" \
+            "1. 取该 tag 的源码，按 \`README.md\` 的「从源码重建」一步步试" \
+            "2. 合完把结果重出一份 \`patches/skyward-nuwa-extra.patch\`" \
+            "3. 改 \`upstream.json\` 的 \`tag\` 与 \`tarball_sha256\`（源码包哈希：\`sha256sum upstream.tar.gz\`）" \
+            "4. 推 main，构建流程自己出包" \
+            "" \
+            "构建日志：$RUN_URL" \
+            "" \
+            "本地也能先试一遍：\`scripts/sync-upstream.sh $TAG\`")
+          gh issue create --title "上游 $TAG 与本仓库的补丁冲突，需要手工合" --body "$BODY" || echo "issue 已存在，跳过"
+          echo "::error::上游 $TAG 与补丁冲突，见 issue"
+          exit 1

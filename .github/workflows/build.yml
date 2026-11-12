@@ -45,8 +45,14 @@ jobs:
       - name: 取上游源码并打补丁
         run: |
           set -euxo pipefail
-          URL=https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/v0.2.0
+          # 上游版本以 upstream.json 为准：同步流程（sync-upstream.yml）只改那个
+          # 文件里的 tag 与源码包哈希，构建跟着走，不在这里硬写版本号。
+          TAG=$(python3 -c "import json;print(json.load(open('upstream.json'))['tag'])")
+          WANT=$(python3 -c "import json;print(json.load(open('upstream.json')).get('tarball_sha256',''))")
+          echo "上游：$TAG"
+          URL="https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/$TAG"
           curl -fL --retry 3 -o upstream.tar.gz "$URL"
+          if [ -n "$WANT" ]; then echo "$WANT  upstream.tar.gz" | sha256sum -c -; fi
           mkdir -p src
           tar xzf upstream.tar.gz -C src --strip-components=1
           # 补丁沿用 mariusarva/skyward-pudding（GPL-3.0）那一份，按提交钉死并核对
