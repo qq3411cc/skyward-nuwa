@@ -120,3 +120,39 @@
  
  /// The file [`kmsg`] writes its lines to as well, once [`keep_log`] opened
  /// it.
+--- a/crates/skyward-crypto/src/data.rs
++++ b/crates/skyward-crypto/src/data.rs
+@@ -151,9 +151,13 @@
+     })();
+     match mounted {
+         Ok((checked, filesystem)) => Ok(Opened { mapped, filesystem, checked }),
+-        Err(e) => match dm::remove(MAPPED) {
+-            Ok(()) => Err(e),
+-            Err(r) => Err(e.context(format!("removing {MAPPED} afterwards failed too: {r:#}"))),
++        Err(e) => match dm::status(MAPPED) {
++            Ok(Some(_)) => match dm::remove(MAPPED) {
++                Ok(()) => Err(e),
++                Err(r) => Err(e.context(format!("removing {MAPPED} afterwards failed too: {r:#}"))),
++            },
++            // Nothing was mapped: the filesystem is read where it lies.
++            _ => Err(e),
+         },
+     }
+ }
+@@ -164,8 +168,15 @@
+ fn map(service: &KeyMint) -> Result<(Vec<Entry>, PathBuf)> {
+     let entries = skyward_block::fstab::read(MOUNT)?;
+     let entry = entries.first().with_context(|| format!("the phone's own table says nothing about {MOUNT}"))?;
+-    let encryption = Encryption::of(entry)?;
+     let device = skyward_block::fstab::device(entry)?;
++    // A phone that encrypts only the files, and not the whole partition, has
++    // no key for the partition to unwrap and nothing to map: its table names
++    // no cipher for the partition, the filesystem is reached as it is, and
++    // each user's key is let into it on its own.
++    if entry.extra("metadata_encryption").is_none() {
++        return Ok((entries, PathBuf::from(device)));
++    }
++    let encryption = Encryption::of(entry)?;
+     let key = storage_key(service, entry, &encryption)?;
+     let sectors = skyward_block::size_bytes(&device)? / 512;
+     let mapped = dm::create(MAPPED, &[target(&device, sectors, &key, &encryption)], false)?;
