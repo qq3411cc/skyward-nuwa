@@ -32,7 +32,13 @@ echo "钉的：$PINNED    要试：$TAG"
 WORK="$ROOT/build/sync-$TAG"
 rm -rf "$WORK"; mkdir -p "$WORK"
 echo "== 1/3 取上游 $TAG"
-curl -fL --retry 3 -o "$WORK/upstream.tar.gz" "https://codeload.github.com/$REPO/tar.gz/refs/tags/$TAG"
+# 直连 codeload 在国内常很慢，先给 90 秒，不行走 gh-proxy 镜像
+URL="https://codeload.github.com/$REPO/tar.gz/refs/tags/$TAG"
+if ! curl -fL --retry 1 --max-time 90 -o "$WORK/upstream.tar.gz" "$URL"; then
+  echo "   直连太慢，改走 gh-proxy"
+  rm -f "$WORK/upstream.tar.gz"
+  curl -fL --retry 3 -o "$WORK/upstream.tar.gz" "https://gh-proxy.com/$URL"
+fi
 SHA=$(sha256sum "$WORK/upstream.tar.gz" | cut -d' ' -f1)
 mkdir -p "$WORK/src"
 tar xzf "$WORK/upstream.tar.gz" -C "$WORK/src" --strip-components=1
