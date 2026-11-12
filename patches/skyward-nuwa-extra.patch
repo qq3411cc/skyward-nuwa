@@ -37,34 +37,42 @@
      }
      skyward_ui::progress::reached(skyward_ui::progress::DRIVERS);
      // The WLAN's driver takes about eleven seconds to make its interface.
-@@ -637,6 +651,21 @@
+@@ -637,6 +651,30 @@
  #[cfg(target_os = "android")]
  const NOBODY: u32 = u32::MAX;
  
-+/// Keep the lines the recovery writes in the file [`skyward_sys::LOG`]
-+/// names, making its folder first; where that cannot be, in the ramdisk's
-+/// own folder, which the next boot takes with it.
++/// Keep a copy of the log where the system that follows can read it. The
++/// metadata partition is mounted read-only, so it is opened to writing for
++/// the copy and closed again, as the display notes are: the log itself
++/// stays in the ramdisk, which the next boot takes with it.
 +#[cfg(target_os = "android")]
-+fn keep_the_log() {
-+    let at = Path::new(skyward_sys::LOG);
-+    if let Some(folder) = at.parent() {
-+        let _ = std::fs::create_dir_all(folder);
-+    }
-+    if skyward_sys::keep_log(at).is_err() {
-+        let _ = std::fs::create_dir_all(skyward_sys::RUN);
-+        let _ = skyward_sys::keep_log(Path::new(skyward_sys::RUN).join("recovery.log").as_path());
-+    }
++fn mirror_the_log() {
++    std::thread::spawn(|| {
++        let metadata = Path::new("/metadata");
++        let at = metadata.join("skyward/recovery.log");
++        loop {
++            std::thread::sleep(std::time::Duration::from_secs(5));
++            if !skyward_block::mount::is_mount_point(metadata).unwrap_or(false) {
++                continue;
++            }
++            let _ = skyward_block::mount::remount_writable(metadata, true);
++            if let Some(folder) = at.parent() {
++                let _ = std::fs::create_dir_all(folder);
++            }
++            let _ = std::fs::copy(skyward_sys::LOG, &at);
++            let _ = skyward_block::mount::remount_writable(metadata, false);
++        }
++    });
 +}
 +
  /// The switch that has the kernel pass the firmware requests it cannot
  /// answer itself on to ueventd.
  #[cfg(target_os = "android")]
-@@ -703,7 +732,7 @@
-         std::fs::create_dir_all(skyward_sys::RUN).with_context(|| format!("make {}", skyward_sys::RUN))?;
+@@ -704,6 +742,7 @@
          std::fs::set_permissions(skyward_sys::RUN, std::fs::Permissions::from_mode(0o755))
              .with_context(|| format!("open {} to the recovery's other users", skyward_sys::RUN))?;
--        skyward_sys::keep_log(Path::new(skyward_sys::LOG))?;
-+        keep_the_log();
+         skyward_sys::keep_log(Path::new(skyward_sys::LOG))?;
++        mirror_the_log();
          // A recovery that ended with a function of its own in the port took
          // the port with it; going through "none" takes that function off.
          if skyward_sys::prop("sys.usb.state").is_some_and(|s| s != "adb") {
@@ -104,22 +112,6 @@
      }
      Ok(())
  }
---- a/crates/skyward-sys/src/lib.rs
-+++ b/crates/skyward-sys/src/lib.rs
-@@ -167,9 +167,10 @@
- /// folder is out of their way.
- pub const RUN: &str = "/skyward/run";
- 
--/// Where the recovery service keeps the lines it writes to the kernel log
--/// for as long as the phone stays in recovery.
--pub const LOG: &str = "/skyward/run/recovery.log";
-+/// Where the recovery service keeps the lines it writes to the kernel log.
-+/// The metadata partition is mounted before the service starts and survives
-+/// the boot, so a run that fails leaves its reason to be read afterwards.
-+pub const LOG: &str = "/metadata/skyward/recovery.log";
- 
- /// The file [`kmsg`] writes its lines to as well, once [`keep_log`] opened
- /// it.
 --- a/crates/skyward-crypto/src/data.rs
 +++ b/crates/skyward-crypto/src/data.rs
 @@ -151,9 +151,13 @@
