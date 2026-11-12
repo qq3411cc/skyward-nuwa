@@ -134,7 +134,7 @@ jobs:
             SHA256SUMS
 
       # 推送 tag 时挂到该 tag 的 Release；推 main 或手动触发时挂到一个固定
-      # tag（nuwa-latest）的 Release，第一次运行会把那个 tag 指到这次提交。
+      # tag（v0.2.41-nuwa）的 Release，第一次运行会把那个 tag 指到这次提交。
       - name: 发布到 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,7 +143,7 @@ jobs:
           if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
-            TAG="nuwa-latest"
+            TAG="v0.2.41-nuwa"
           fi
           echo "发布到 $TAG"
           gh release view "$TAG" >/dev/null 2>&1 || \
