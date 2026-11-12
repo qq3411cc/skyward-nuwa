@@ -222,3 +222,38 @@
      let wrapped = crate::fscrypt::hardware_wrapped(mode.trim());
      let dir = Path::new(USER_KEYS).join("ce").join(user.to_string()).join("current");
      let stored = StoredKey::load(&dir).with_context(|| format!("read the key in {}", dir.display()))?;
+--- a/crates/skyward-net/src/dns.rs
++++ b/crates/skyward-net/src/dns.rs
+@@ -13,6 +13,10 @@
+ /// How long a server gets to answer.
+ const WAIT: Duration = Duration::from_secs(3);
+ 
++/// The servers to ask when the network's own answer nothing: a recovery has no
++/// resolver of its own to fall back on, and some routers answer none at all,
++/// while the way out to these is open.
++const PUBLIC: [Ipv4Addr; 3] = [Ipv4Addr::new(223, 5, 5, 5), Ipv4Addr::new(119, 29, 29, 29), Ipv4Addr::new(8, 8, 8, 8)];
+ 
+ /// A question for the IPv4 addresses of `host`, numbered `id`.
+ pub fn question(id: u16, host: &str) -> Result<Vec<u8>> {
+@@ -72,11 +76,18 @@
+     if let Ok(address) = host.parse::<Ipv4Addr>() {
+         return Ok(vec![address]);
+     }
+-    if servers.is_empty() {
++    let mut last = None;
++    // The network's own first, then those that answer where it answers none.
++    let mut asked: Vec<Ipv4Addr> = servers.to_vec();
++    for extra in PUBLIC {
++        if !asked.contains(&extra) {
++            asked.push(extra);
++        }
++    }
++    if asked.is_empty() {
+         bail!("the network gave no DNS server");
+     }
+-    let mut last = None;
+-    for server in servers {
++    for server in &asked {
+         match ask_server(host, SocketAddrV4::new(*server, PORT))? {
+             Ok(found) => return Ok(found),
+             Err(why) => last = Some(why),
