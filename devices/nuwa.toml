@@ -185,11 +185,15 @@ modules = ["qca_cld3_kiwi_v2"]
 writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
 firmware = [
     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "kiwi_v2/wlan_mac.bin" },
+    # persist 已经由 [partitions] 挂在 /mnt/vendor/persist，直接从这里读：让
+    # skyward 自己去挂会撞上「已经挂过」，mount 返回 EBUSY，WLAN 整条起不来。
+    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", path = "/mnt/vendor/persist/kiwi_v2/wlan_mac.bin" },
 ]
 interface = "wlan0"
 supplicant = "/vendor/bin/hw/wpa_supplicant"
-libraries = ["/vendor/lib64", "/system/lib64"]
+# wpa_supplicant 跑在 recovery 自己的库上，厂商分区的那份排在后面：厂商分区
+# 带着最底层那几个库的自己一份，程序加载了它就不被 recovery 的服务目录认了。
+libraries = ["/system/lib64", "/vendor/lib64"]
 service = "android.hardware.wifi.supplicant.ISupplicant/default"
 probe = "http://connect.rom.miui.com/generate_204"
 

@@ -148,3 +148,77 @@
      let key = storage_key(service, entry, &encryption)?;
      let sectors = skyward_block::size_bytes(&device)? / 512;
      let mapped = dm::create(MAPPED, &[target(&device, sectors, &key, &encryption)], false)?;
+@@ -262,6 +273,13 @@
+     }
+     at(4);
+     let closed = open_made_up(service, closed, &owner);
++    // Nothing left closed means the owner's own files are open, or the phone
++    // keeps none behind a key at all: either way the folder their shared
++    // storage is shown from is to be shown, which opening their files does
++    // for them only where they had a key to let in.
++    if closed.is_empty() {
++        show_owner_storage()?;
++    }
+     at(5);
+     Ok(Opening { mounted, closed })
+ }
+@@ -326,7 +344,14 @@
+ /// Let in the key for the files that belong to no one user. Until it is
+ /// in, most of what the data partition holds reads as scrambled names.
+ fn open_shared(service: &KeyMint) -> Result<[u8; crate::fscrypt::NAME_BYTES]> {
+-    let mode = std::fs::read_to_string(FILE_MODE).with_context(|| format!("read {FILE_MODE}"))?;
++    // A phone that does not encrypt its data partition keeps no key for it
++    // and says nothing about how it would be encrypted: there is nothing to
++    // let in, and nothing to fail over.
++    let mode = match std::fs::read_to_string(FILE_MODE) {
++        Ok(mode) => mode,
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok([0; crate::fscrypt::NAME_BYTES]),
++        Err(e) => return Err(e).with_context(|| format!("read {FILE_MODE}")),
++    };
+     let wrapped = crate::fscrypt::hardware_wrapped(mode.trim());
+     let raw = hardware_key(service, Path::new(SHARED_KEY), wrapped)?;
+     let name = crate::fscrypt::add_key(Path::new(MOUNT), &raw, wrapped)?;
+@@ -341,7 +366,14 @@
+ fn users() -> Result<Vec<u32>> {
+     let dir = Path::new(USER_KEYS).join("de");
+     let mut users = Vec::new();
+-    for entry in std::fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))? {
++    // No folder of keys at all: the phone keeps none, as one that does not
++    // encrypt its data partition does.
++    let listing = match std::fs::read_dir(&dir) {
++        Ok(listing) => listing,
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(users),
++        Err(e) => return Err(e).with_context(|| format!("read {}", dir.display())),
++    };
++    for entry in listing {
+         let path = entry.with_context(|| format!("read {}", dir.display()))?.path();
+         let Some(user) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.parse::<u32>().ok()) else { continue };
+         users.push(user);
+@@ -353,7 +385,13 @@
+ /// Let in the keys for the files of each user that are readable before
+ /// that user signs in, and give the users they belong to.
+ fn open_users(service: &KeyMint) -> Result<Vec<u32>> {
+-    let mode = std::fs::read_to_string(FILE_MODE).with_context(|| format!("read {FILE_MODE}"))?;
++    // As in [`open_shared`]: a partition that is not encrypted says nothing
++    // about how it would be, and keeps no key of a user's to let in.
++    let mode = match std::fs::read_to_string(FILE_MODE) {
++        Ok(mode) => mode,
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
++        Err(e) => return Err(e).with_context(|| format!("read {FILE_MODE}")),
++    };
+     let wrapped = crate::fscrypt::hardware_wrapped(mode.trim());
+     let users = users()?;
+     for user in &users {
+@@ -586,7 +624,11 @@
+     let synthetic_password = crate::user::open_inner(&secret, &inner)?;
+     let file_secret = crate::user::file_secret(&synthetic_password);
+ 
+-    let mode = std::fs::read_to_string(FILE_MODE).with_context(|| format!("read {FILE_MODE}"))?;
++    let mode = match std::fs::read_to_string(FILE_MODE) {
++        Ok(mode) => mode,
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
++        Err(e) => return Err(e).with_context(|| format!("read {FILE_MODE}")),
++    };
+     let wrapped = crate::fscrypt::hardware_wrapped(mode.trim());
+     let dir = Path::new(USER_KEYS).join("ce").join(user.to_string()).join("current");
+     let stored = StoredKey::load(&dir).with_context(|| format!("read the key in {}", dir.display()))?;
