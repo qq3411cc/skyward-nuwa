@@ -39,14 +39,22 @@ post_boot → touch_report → touchsensor
 
 ## 下载与刷入
 
-到 [Releases](../../releases) 下最新的 `.img` 与 `SHA256SUMS`，校验后：
+到 [Releases](../../releases/tag/v0.2.41-nuwa) 下最新的 `.img` 与 `SHA256SUMS`，校验后：
 
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 a
-fastboot flash recovery_a skyward-nuwa-<日期>-<tag>-OS4.0.5.0.XPCCNXM.img
+fastboot flash recovery_a skyward-nuwa-20261112-0.2.41-OS4.0.5.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进
+```
+
+当前发布的一份（真机验证通过）：
+
+```
+skyward-nuwa-20261112-0.2.41-OS4.0.5.0.XPCCNXM.img
+104857600 字节
+sha256 706379de5bf700ca5dde05a53e79a18304ced9cdb50f7a22e9111f12537ba74d
 ```
 
 - 需要已解锁 BL
@@ -113,8 +121,10 @@ python3 tools/payload_get.py "<ota.zip 直链>" recovery recovery_stock.img \
 ## 已知限制
 
 - 只在 `nuwa` / OS4.0.5.0.XPCCNXM 上核对过配置，其他机型不要刷
+- 本机 ROM 的 `/data` **没有加密**（fstab 无 `fileencryption`、无 `metadata_encryption`、`/data/misc/vold` 无 user_keys），所以 recovery 里不需要密码，直接挂上就能读写；加密的机器仍走 keymint + gatekeeper 那条路
 - 底座是 OS3.0.312.0.WMBCNXM 的原厂 recovery ramdisk（公开可下载的最新一版），装机的系统版本与它不同没关系：recovery 挂的是装机系统的分区，版本是运行时从属性读出来的
 - 没有 weaver，所以走的是 gatekeeper + keymint 那条路；`ro.special_edition` 为空的机型都适用
+- 本机路由器的 DNS（192.168.50.1）不答 53，recovery 里没有 netd，所以 WLAN 的联网判定要公共 DNS 兜底（`223.5.5.5 / 119.29.29.29 / 8.8.8.8`），这一段已编进镜像
 - 记住密码（锁屏与 WiFi）都是**明文**存在 `/metadata`（0600，root），恢复出厂会清
 - 触摸面板驱动要几秒才起来，前几秒只能按键，之后自动恢复（等待窗口 10 秒）
 
