@@ -1,0 +1,136 @@
+name: build
+
+# 按 tag（v*）或手动触发，整份镜像在 GitHub 的机器上编出来：
+# 取上游 kirklin/skyward v0.2.0 源码 → 打本仓库的补丁 → 交叉编译 skyward 与
+# system-init → 用 skyward-pack 从小米服务器取 nuwa 原厂 recovery（只读这一个
+# 分区所占的部分，并按 devices/nuwa.toml 里的 SHA-256 核对）→ 在原厂 recovery
+# 上打包成整份镜像，带自己的 AVB 头尾。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release:
+        description: '写进二进制的发布号，例如 0.2.41'
+        required: true
+        default: '0.2.41'
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 工具
+        run: sudo apt-get update && sudo apt-get install -y lz4 cpio patch
+
+      - name: Rust 与 aarch64 目标
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Android NDK
+        run: |
+          set -e
+          curl -fL --retry 3 -o "$RUNNER_TEMP/ndk.zip" \
+            https://dl.google.com/android/repository/android-ndk-r29-linux.zip
+          unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP"
+          echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r29" >> "$GITHUB_ENV"
+
+      - name: 取上游源码并打补丁
+        run: |
+          set -euxo pipefail
+          URL=https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/v0.2.0
+          curl -fL --retry 3 -o upstream.tar.gz "$URL"
+          mkdir -p src
+          tar xzf upstream.tar.gz -C src --strip-components=1
+          # 补丁沿用 mariusarva/skyward-pudding（GPL-3.0）那一份，按提交钉死并核对
+          # SHA-256，内容与本仓库当初构建时用的完全一致。
+          PATCH_URL=https://raw.githubusercontent.com/mariusarva/skyward-pudding/9ab25b7802466e1fae0decb1b4d3f133540be1c3/patches/skyward-pudding-v0.2.41.patch
+          PATCH_SHA=12e6d543dc23b60a7478211fe000cd3e8f487fbcb3bea460618beb501b534f0c
+          curl -fL --retry 3 -o skyward.patch "$PATCH_URL"
+          echo "$PATCH_SHA  skyward.patch" | sha256sum -c -
+          cd src
+          patch -p1 --batch --no-backup-if-mismatch < ../skyward.patch
+          if find . -name '*.rej' | head -1 | grep -q .; then
+            echo "补丁有冲突："
+            find . -name '*.rej' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
+            exit 1
+          fi
+          # 本仓库的设备配置覆盖上游那份：解密 data 要的厂商服务在这里
+          cp ../devices/nuwa.toml devices/nuwa.toml
+          echo "补丁打上了，设备配置已换成本仓库的"
+
+      - name: 交叉编译
+        run: |
+          set -e
+          NDK="$ANDROID_NDK_HOME"
+          SYSROOT="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          BUILTINS=$(dirname "$(find "$NDK/toolchains/llvm/prebuilt/linux-x86_64/lib/clang" \
+            -name 'libclang_rt.builtins-aarch64-android.a' | head -1)")
+          CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          printf '#!/bin/sh\nexec "%s" --target=aarch64-linux-android30 --sysroot="%s" -rtlib=compiler-rt -L"%s" "$@"\n' \
+            "$CLANG" "$SYSROOT" "$BUILTINS" > /tmp/cc-aarch64.sh
+          chmod +x /tmp/cc-aarch64.sh
+          RELEASE="${{ github.event.inputs.release || github.ref_name }}"
+          RELEASE="${RELEASE#v}"
+          echo "发布号：$RELEASE"
+          export CC_aarch64_linux_android=/tmp/cc-aarch64.sh
+          export AR_aarch64_linux_android=ar
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/tmp/cc-aarch64.sh
+          export SKYWARD_RELEASE="$RELEASE"
+          cd src
+          cargo build --release -p skyward --target aarch64-linux-android
+          RUSTFLAGS="-C target-feature=+crt-static" \
+            cargo build --release -p skyward-system-init --target aarch64-linux-android \
+            --target-dir target/system-init
+          cargo build --release -p skyward-pack
+
+      - name: 取原厂 recovery 并打包
+        run: |
+          set -e
+          cd src
+          mkdir -p ../stock
+          ./target/release/skyward-pack stock --config devices/nuwa.toml --out ../stock/recovery.img
+          NAME="skyward-nuwa-$(date +%Y%m%d)-${{ github.ref_name }}-OS4.0.5.0.XPCCNXM.img"
+          ./target/release/skyward-pack recovery \
+            --stock ../stock/recovery.img \
+            --binary target/aarch64-linux-android/release/skyward \
+            --system-init target/system-init/aarch64-linux-android/release/system-init \
+            --config devices/nuwa.toml \
+            --font resources/fonts/MiSansVF.ttf \
+            --mono resources/fonts/KirkMono-Regular.ttf \
+            --mono-license resources/fonts/KirkMono-OFL.txt \
+            --out "../$NAME"
+          cd ..
+          sha256sum "$NAME" | tee SHA256SUMS
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image
+          path: |
+            skyward-nuwa-*.img
+            SHA256SUMS
+
+      # 推送 tag 时挂到该 tag 的 Release；推 main 或手动触发时挂到一个固定
+      # tag（v0.2.41-nuwa）的 Release，第一次运行会把那个 tag 指到这次提交。
+      - name: 发布到 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v0.2.41-nuwa"
+          fi
+          echo "发布到 $TAG"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Skyward for Xiaomi 13 Pro (nuwa) $TAG" \
+              --notes "由 GitHub Actions 在 \`$GITHUB_SHA\` 上构建。解密 data 要的厂商服务见 devices/nuwa.toml 与 docs/开发记录.md。"
+          gh release upload "$TAG" skyward-nuwa-*.img SHA256SUMS --clobber
