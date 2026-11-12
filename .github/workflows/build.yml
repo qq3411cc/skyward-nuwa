@@ -77,9 +77,17 @@ jobs:
           printf '#!/bin/sh\nexec "%s" --target=aarch64-linux-android30 --sysroot="%s" -rtlib=compiler-rt -L"%s" "$@"\n' \
             "$CLANG" "$SYSROOT" "$BUILTINS" > /tmp/cc-aarch64.sh
           chmod +x /tmp/cc-aarch64.sh
-          RELEASE="${{ github.event.inputs.release || github.ref_name }}"
+          # 发布号：手动触发与 tag 用它，推 main 时用默认的 0.2.41（不能用 main）
+          RELEASE="${{ github.event.inputs.release || '' }}"
+          if [ -z "$RELEASE" ]; then
+            case "$GITHUB_REF" in
+              refs/tags/*) RELEASE="${GITHUB_REF#refs/tags/}" ;;
+              *) RELEASE="0.2.41" ;;
+            esac
+          fi
           RELEASE="${RELEASE#v}"
           echo "发布号：$RELEASE"
+          echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
           export CC_aarch64_linux_android=/tmp/cc-aarch64.sh
           export AR_aarch64_linux_android=ar
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/tmp/cc-aarch64.sh
@@ -97,7 +105,7 @@ jobs:
           cd src
           mkdir -p ../stock
           ./target/release/skyward-pack stock --config devices/nuwa.toml --out ../stock/recovery.img
-          NAME="skyward-nuwa-$(date +%Y%m%d)-${{ github.ref_name }}-OS4.0.5.0.XPCCNXM.img"
+          NAME="skyward-nuwa-$(date +%Y%m%d)-$RELEASE-OS4.0.5.0.XPCCNXM.img"
           ./target/release/skyward-pack recovery \
             --stock ../stock/recovery.img \
             --binary target/aarch64-linux-android/release/skyward \
@@ -134,4 +142,7 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --target "$GITHUB_SHA" --title "Skyward for Xiaomi 13 Pro (nuwa) $TAG" \
               --notes "由 GitHub Actions 在 \`$GITHUB_SHA\` 上构建。解密 data 要的厂商服务见 devices/nuwa.toml 与 docs/开发记录.md。"
+          # 只留一份镜像：先删掉旧的 .img，再传新的
+          gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep '\.img$' | \
+            while read -r old; do gh release delete-asset "$TAG" "$old" -y || true; done
           gh release upload "$TAG" skyward-nuwa-*.img SHA256SUMS --clobber
