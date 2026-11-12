@@ -1,0 +1,122 @@
+--- a/crates/skyward/src/main.rs
++++ b/crates/skyward/src/main.rs
+@@ -511,16 +511,30 @@
+     // The drivers ask for their firmware by name, and the kernel looks only
+     // in folders of its own unless told to pass on what it does not find
+     // there to ueventd, which looks in the recovery's firmware folders.
+-    std::fs::write(FIRMWARE_FALLBACK, "1").with_context(|| format!("write 1 to {FIRMWARE_FALLBACK}"))?;
++    // Each step below is written down and then gone on from: one that fails
++    // is a reason in the log, not the end of the ones after it, which are
++    // what the phone is brought up for.
++    if let Err(e) = std::fs::write(FIRMWARE_FALLBACK, "1") {
++        skyward_sys::kmsg(&format!("firmware requests are not passed on: {e:#}"))?;
++    }
+     if let Some(firmware) = &cfg.firmware {
+-        mount_firmware(&firmware.partition)?;
++        if let Err(e) = mount_firmware(&firmware.partition) {
++            skyward_sys::kmsg(&format!("the firmware is not reachable: {e:#}"))?;
++        }
+     }
+     for name in &cfg.partitions.mounted {
+-        let at = skyward_block::fstab::mount(name)?;
+-        skyward_sys::kmsg(&format!("{name} is mounted on {}", at.display()))?;
++        match skyward_block::fstab::mount(name) {
++            Ok(at) => skyward_sys::kmsg(&format!("{name} is mounted on {}", at.display()))?,
++            Err(e) => skyward_sys::kmsg(&format!("{name} is not mounted: {e:#}"))?,
++        }
+     }
+-    for path in load_modules(cfg, &cfg.modules.load)? {
+-        skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
++    match load_modules(cfg, &cfg.modules.load) {
++        Ok(paths) => {
++            for path in paths {
++                skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
++            }
++        }
++        Err(e) => skyward_sys::kmsg(&format!("the drivers are not loaded: {e:#}"))?,
+     }
+     skyward_ui::progress::reached(skyward_ui::progress::DRIVERS);
+     // The WLAN's driver takes about eleven seconds to make its interface.
+@@ -637,6 +651,21 @@
+ #[cfg(target_os = "android")]
+ const NOBODY: u32 = u32::MAX;
+ 
++/// Keep the lines the recovery writes in the file [`skyward_sys::LOG`]
++/// names, making its folder first; where that cannot be, in the ramdisk's
++/// own folder, which the next boot takes with it.
++#[cfg(target_os = "android")]
++fn keep_the_log() {
++    let at = Path::new(skyward_sys::LOG);
++    if let Some(folder) = at.parent() {
++        let _ = std::fs::create_dir_all(folder);
++    }
++    if skyward_sys::keep_log(at).is_err() {
++        let _ = std::fs::create_dir_all(skyward_sys::RUN);
++        let _ = skyward_sys::keep_log(Path::new(skyward_sys::RUN).join("recovery.log").as_path());
++    }
++}
++
+ /// The switch that has the kernel pass the firmware requests it cannot
+ /// answer itself on to ueventd.
+ #[cfg(target_os = "android")]
+@@ -703,7 +732,7 @@
+         std::fs::create_dir_all(skyward_sys::RUN).with_context(|| format!("make {}", skyward_sys::RUN))?;
+         std::fs::set_permissions(skyward_sys::RUN, std::fs::Permissions::from_mode(0o755))
+             .with_context(|| format!("open {} to the recovery's other users", skyward_sys::RUN))?;
+-        skyward_sys::keep_log(Path::new(skyward_sys::LOG))?;
++        keep_the_log();
+         // A recovery that ended with a function of its own in the port took
+         // the port with it; going through "none" takes that function off.
+         if skyward_sys::prop("sys.usb.state").is_some_and(|s| s != "adb") {
+--- a/crates/skyward/src/services.rs
++++ b/crates/skyward/src/services.rs
+@@ -42,7 +42,8 @@
+     let known = ueventd::accounts(&ueventd::PASSWD_FILES.iter().chain(&ueventd::GROUP_FILES).copied().collect::<Vec<_>>());
+     for s in services {
+         if !Path::new(&s.path).is_file() {
+-            bail!("{} is missing; is its partition mounted?", s.path);
++            skyward_sys::kmsg(&format!("{} is missing; is its partition mounted?", s.path))?;
++            continue;
+         }
+         let mut s = s.clone();
+         if let Some(dir) = libraries {
+@@ -51,14 +52,20 @@
+         let who = Credentials::of(&s, &known)?;
+         if s.oneshot {
+             let status = command(&s, &who).status().with_context(|| format!("run {}", s.path))?;
+-            ensure!(status.success(), "{} {} ended: {status}", s.path, s.args.join(" "));
+-            skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
++            if !status.success() {
++                skyward_sys::kmsg(&format!("{} {} ended: {status}", s.path, s.args.join(" ")))?;
++            } else {
++                skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
++            }
+             continue;
+         }
+         let waiting = s.clone();
+         let name = Path::new(&s.path).file_name().map_or_else(|| s.path.clone(), |n| n.to_string_lossy().into_owned());
+         thread::Builder::new().name(name).spawn(move || supervise(&s, &who)).context("start a supervising thread")?;
+-        ready(&waiting)?;
++        skyward_sys::kmsg(&format!("started {}", waiting.path))?;
++        if let Err(e) = ready(&waiting) {
++            skyward_sys::kmsg(&format!("not ready: {e:#}"))?;
++        }
+     }
+     Ok(())
+ }
+--- a/crates/skyward-sys/src/lib.rs
++++ b/crates/skyward-sys/src/lib.rs
+@@ -167,9 +167,10 @@
+ /// folder is out of their way.
+ pub const RUN: &str = "/skyward/run";
+ 
+-/// Where the recovery service keeps the lines it writes to the kernel log
+-/// for as long as the phone stays in recovery.
+-pub const LOG: &str = "/skyward/run/recovery.log";
++/// Where the recovery service keeps the lines it writes to the kernel log.
++/// The metadata partition is mounted before the service starts and survives
++/// the boot, so a run that fails leaves its reason to be read afterwards.
++pub const LOG: &str = "/metadata/skyward/recovery.log";
+ 
+ /// The file [`kmsg`] writes its lines to as well, once [`keep_log`] opened
+ /// it.
