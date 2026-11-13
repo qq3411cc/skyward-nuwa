@@ -39,25 +39,18 @@ post_boot → touch_report → touchsensor
 
 ## 下载与刷入
 
-到 [Releases](../../releases/tag/v0.2.41-nuwa) 下最新的 `.img` 与 `SHA256SUMS`，校验后：
+到 [Releases](../../releases) 下最新的 `.img` 与 `SHA256SUMS`，校验后：
 
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 a
-fastboot flash recovery_a skyward-nuwa-20261112-0.2.41-OS4.0.5.0.XPCCNXM.img
+fastboot flash recovery_a skyward-nuwa-<日期>-<发布号>-OS4.0.5.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进
 ```
 
-当前发布的一份（真机验证通过）：
-
-```
-skyward-nuwa-20261112-0.2.41-OS4.0.5.0.XPCCNXM.img
-104857600 字节
-sha256 706379de5bf700ca5dde05a53e79a18304ced9cdb50f7a22e9111f12537ba74d
-```
-
-以后重新构建的镜像哈希会变（每次构建的字节不完全一致），以该 Release 里的 `SHA256SUMS` 为准。
+Release 里同时挂一份 `.zip`（只含一个 `.img`）：那是恢复里「设置 → 版本更新」认的格式，
+从恢复里直接更新就用它，不用电脑。
 
 - 需要已解锁 BL
 - 只动 recovery 分区，`boot` / `init_boot` / `vendor_boot` 不碰
@@ -79,11 +72,12 @@ sha256sum -c SHA256SUMS
 curl -L -o skyward.tar.gz https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/v0.2.0
 tar xzf skyward.tar.gz && cd skyward-0.2.0
 
-# 2) 打补丁（沿用 mariusarva/skyward-pudding 那一份，按提交钉死），换本仓库的设备配置
+# 2) 打补丁（mariusarva/skyward-pudding 那一份，按提交钉死），再打本仓库的补丁
 curl -L -o ../skyward.patch \
-  https://raw.githubusercontent.com/mariusarva/skyward-pudding/9ab25b7802466e1fae0decb1b4d3f133540be1c3/patches/skyward-pudding-v0.2.41.patch
-echo "12e6d543dc23b60a7478211fe000cd3e8f487fbcb3bea460618beb501b534f0c  ../skyward.patch" | sha256sum -c -
+  https://raw.githubusercontent.com/mariusarva/skyward-pudding/ab6cf82cda6cef28457ae845901babf1c17dd0bb/patches/skyward-pudding-v0.2.49.patch
+echo "20f169da07c912f5a5f9bdbae2df1e8bd4778fd8a2d9254d8af63f690dda6f9e  ../skyward.patch" | sha256sum -c -
 patch -p1 < ../skyward.patch
+patch -p1 < ../patches/skyward-nuwa-extra.patch
 cp ../devices/nuwa.toml devices/nuwa.toml
 
 # 3) 交叉编译（NDK r29 + cargo-ndk）
@@ -118,28 +112,45 @@ python3 tools/payload_get.py "<ota.zip 直链>" recovery recovery_stock.img \
 
 ## 上游更新了怎么办
 
-本仓库不跟上游的分支，跟的是**一个钉死的版本**，写在 `upstream.json`：
+代码 = **上游源码的某个 tag** + **mariusarva/skyward-pudding 的补丁** + **本仓库的补丁**。三者都钉死在 `upstream.json`：
 
 ```json
-{ "repository": "kirklin/skyward", "tag": "v0.2.0", "tarball_sha256": "f46e0da3…" }
+{
+  "base":    { "repository": "kirklin/skyward", "tag": "v0.2.0", "tarball_sha256": "f46e0da3…" },
+  "patches": { "repository": "mariusarva/skyward-pudding", "commit": "ab6cf82…",
+               "path": "patches/skyward-pudding-v0.2.49.patch", "sha256": "20f169da…" }
+}
 ```
 
-构建流程只读这个文件，不硬写版本号（源码包哈希对不上会直接失败）。上游一动，两条路跟上：
+构建只读这个文件：源码包哈希或补丁哈希对不上直接失败，不硬写任何版本号。
 
-**自动**：`.github/workflows/sync-upstream.yml` 每天 04:00 查一次上游 tag。有新版本就下源码，先把「pudding 补丁 + `patches/skyward-nuwa-extra.patch`」试打一遍：
+**自动**：`.github/workflows/sync-upstream.yml` 每天 04:00 查一次上游 `patches/` 目录，取版本号最大的那个补丁：
 
-- 打得进去 → 改 `upstream.json` 的 tag 与源码包哈希、提交、触发构建，直接出新包
-- 打不进去 → 开一个 issue，把失败的 hunk 列出来，等人合（补丁按版本钉死，冲突是常态）
+- 与钉的一样 → 结束
+- 不一样 → 下新补丁，先 `--dry-run` 试打「新补丁 + `patches/skyward-nuwa-extra.patch`」
+  - 都过得去 → 改 `upstream.json` 的 `commit` / `path` / `sha256`，提交，再 `gh workflow run build.yml` 出包
+  - 有冲突 → 开 issue 把 `Hunk #N FAILED` 贴出来，运行标红等人合
 
 **手动**：
 
 ```sh
-scripts/sync-upstream.sh                  # 查最新，与钉的比
-scripts/sync-upstream.sh v0.3.0           # 指定 tag 试打，报冲突位置
-scripts/sync-upstream.sh v0.3.0 --write   # 打得进去就写回 upstream.json
+scripts/sync-upstream.sh                  # 查最新补丁，与钉的比
+scripts/sync-upstream.sh v0.2.52          # 指定补丁版本试打，报冲突位置
+scripts/sync-upstream.sh v0.2.52 --write  # 打得进去就写回 upstream.json
 ```
 
 合完冲突后重出补丁的办法见 `docs/开发记录.md`。
+
+## 恢复里的「版本更新」
+
+`devices/nuwa.toml` 的 `[update] skyward` 指向**本仓库**的 `docs/update.json`（走 `gh-proxy.com` 镜像）：
+
+```toml
+[update]
+skyward = "https://gh-proxy.com/https://raw.githubusercontent.com/qq3411cc/skyward-nuwa/main/docs/update.json"
+```
+
+这个文件由 CI 每次构建后自动改写（tag、zip 的名字、大小、sha256、两个下载地址），所以恢复里点「版本更新」看到的就是本仓库最新那版。**不要**让它去问上游：上游的包是 pudding 的，装上去会把这份的改动全冲掉。
 
 ## 用 GitHub Actions 构建
 

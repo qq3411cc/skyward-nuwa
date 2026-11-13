@@ -1,10 +1,13 @@
 name: build
 
-# 按 tag（v*）、推 main 或手动触发，整份镜像在 GitHub 的机器上编出来：
-# 取上游 kirklin/skyward v0.2.0 源码 → 打补丁（pudding 那份 + 本仓库的诊断补丁）
-# → 交叉编译 skyward 与 system-init → 用 skyward-pack 从小米服务器取 nuwa 原厂
-# recovery（只读这一个分区所占的部分，并按 devices/nuwa.toml 里的 SHA-256 核对）
-# → 在原厂 recovery 上打包成整份镜像，带自己的 AVB 头尾。
+# 推 main / tag / 手动触发，整份镜像在 GitHub 的机器上编出来：
+#   1. 取 upstream.json 里 base 指的上游源码（kirklin/skyward 的 tag，核对源码包哈希）
+#   2. 打 upstream.json 里 patches 指的补丁（mariusarva/skyward-pudding，按提交+哈希钉死）
+#   3. 再打本仓库的 patches/skyward-nuwa-extra.patch
+#   4. 交叉编译 skyward 与 system-init
+#   5. 用 skyward-pack 取原厂 recovery 打包成整份镜像（带自己的 AVB 头尾）
+#   6. 出 img 与 zip，挂到 Release，并把 docs/update.json 写成这一版
+#      （恢复里的「版本更新」读的就是这个文件）
 
 on:
   push:
@@ -13,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: '写进二进制的发布号，例如 0.2.41'
+        description: '写进二进制的发布号，例如 0.2.49'
         required: true
-        default: '0.2.41'
+        default: '0.2.49'
 
 permissions:
   contents: write
@@ -27,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 工具
-        run: sudo apt-get update && sudo apt-get install -y lz4 cpio patch
+        run: sudo apt-get update && sudo apt-get install -y lz4 cpio patch zip
 
       - name: Rust 与 aarch64 目标
         uses: dtolnay/rust-toolchain@stable
@@ -45,36 +48,35 @@ jobs:
       - name: 取上游源码并打补丁
         run: |
           set -euxo pipefail
-          # 上游版本以 upstream.json 为准：同步流程（sync-upstream.yml）只改那个
-          # 文件里的 tag 与源码包哈希，构建跟着走，不在这里硬写版本号。
-          TAG=$(python3 -c "import json;print(json.load(open('upstream.json'))['tag'])")
-          WANT=$(python3 -c "import json;print(json.load(open('upstream.json')).get('tarball_sha256',''))")
-          echo "上游：$TAG"
-          URL="https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/$TAG"
-          curl -fL --retry 3 -o upstream.tar.gz "$URL"
-          if [ -n "$WANT" ]; then echo "$WANT  upstream.tar.gz" | sha256sum -c -; fi
+          read_pin() { python3 -c "import json,sys;d=json.load(open('upstream.json'));print(eval(sys.argv[1]))" "$1"; }
+          BASE_REPO=$(read_pin "d['base']['repository']")
+          BASE_TAG=$(read_pin "d['base']['tag']")
+          BASE_SHA=$(read_pin "d['base'].get('tarball_sha256','')")
+          P_REPO=$(read_pin "d['patches']['repository']")
+          P_COMMIT=$(read_pin "d['patches']['commit']")
+          P_PATH=$(read_pin "d['patches']['path']")
+          P_SHA=$(read_pin "d['patches']['sha256']")
+          echo "上游：$BASE_REPO $BASE_TAG   补丁：$P_REPO $P_COMMIT $P_PATH"
+
+          curl -fL --retry 3 -o upstream.tar.gz "https://codeload.github.com/$BASE_REPO/tar.gz/refs/tags/$BASE_TAG"
+          if [ -n "$BASE_SHA" ]; then echo "$BASE_SHA  upstream.tar.gz" | sha256sum -c -; fi
           mkdir -p src
           tar xzf upstream.tar.gz -C src --strip-components=1
-          # 补丁沿用 mariusarva/skyward-pudding（GPL-3.0）那一份，按提交钉死并核对
-          # SHA-256，内容与本仓库当初构建时用的完全一致。
-          PATCH_URL=https://raw.githubusercontent.com/mariusarva/skyward-pudding/9ab25b7802466e1fae0decb1b4d3f133540be1c3/patches/skyward-pudding-v0.2.41.patch
-          PATCH_SHA=12e6d543dc23b60a7478211fe000cd3e8f487fbcb3bea460618beb501b534f0c
-          curl -fL --retry 3 -o skyward.patch "$PATCH_URL"
-          echo "$PATCH_SHA  skyward.patch" | sha256sum -c -
+
+          curl -fL --retry 3 -o pudding.patch \
+            "https://raw.githubusercontent.com/$P_REPO/$P_COMMIT/$P_PATH"
+          echo "$P_SHA  pudding.patch" | sha256sum -c -
+
           cd src
-          patch -p1 --batch --no-backup-if-mismatch < ../skyward.patch
-          if find . -name '*.rej' | head -1 | grep -q .; then
-            echo "补丁有冲突："
-            find . -name '*.rej' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
-            exit 1
-          fi
-          # 本仓库的补丁：日志落到 /metadata（跨重启可读），一步失败只记不中断服务链
-          patch -p1 --batch --no-backup-if-mismatch < ../patches/skyward-nuwa-extra.patch
-          if find . -name '*.rej' | head -1 | grep -q .; then
-            echo "本仓库的补丁有冲突："
-            find . -name '*.rej' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
-            exit 1
-          fi
+          for P in ../pudding.patch ../patches/skyward-nuwa-extra.patch; do
+            echo "== 打 $(basename "$P")"
+            patch -p1 --batch --no-backup-if-mismatch < "$P"
+            if find . -name '*.rej' | head -1 | grep -q .; then
+              echo "!! $(basename "$P") 有冲突："
+              find . -name '*.rej' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
+              exit 1
+            fi
+          done
           # 本仓库的设备配置覆盖上游那份：解密 data 要的厂商服务在这里
           cp ../devices/nuwa.toml devices/nuwa.toml
           echo "补丁打上了，设备配置已换成本仓库的"
@@ -90,12 +92,12 @@ jobs:
           printf '#!/bin/sh\nexec "%s" --target=aarch64-linux-android30 --sysroot="%s" -rtlib=compiler-rt -L"%s" "$@"\n' \
             "$CLANG" "$SYSROOT" "$BUILTINS" > /tmp/cc-aarch64.sh
           chmod +x /tmp/cc-aarch64.sh
-          # 发布号：手动触发与 tag 用它，推 main 时用默认的 0.2.41（不能用 main）
+          # 发布号：手动触发与 tag 用它，推 main 时用默认值（不能用 main）
           RELEASE="${{ github.event.inputs.release || '' }}"
           if [ -z "$RELEASE" ]; then
             case "$GITHUB_REF" in
               refs/tags/*) RELEASE="${GITHUB_REF#refs/tags/}" ;;
-              *) RELEASE="0.2.41" ;;
+              *) RELEASE="0.2.49" ;;
             esac
           fi
           RELEASE="${RELEASE#v}"
@@ -129,18 +131,22 @@ jobs:
             --mono-license resources/fonts/KirkMono-OFL.txt \
             --out "../$NAME"
           cd ..
-          sha256sum "$NAME" | tee SHA256SUMS
+          # 更新器要的是「只含一个 .img 的 zip」
+          ZIP="${NAME%.img}.zip"
+          zip -9 -j "$ZIP" "$NAME" > /dev/null
+          sha256sum "$NAME" "$ZIP" | tee SHA256SUMS
           echo "NAME=$NAME" >> "$GITHUB_ENV"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
           name: image
           path: |
             skyward-nuwa-*.img
+            skyward-nuwa-*.zip
             SHA256SUMS
 
-      # 推送 tag 时挂到该 tag 的 Release；推 main 或手动触发时挂到一个固定
-      # tag（v0.2.41-nuwa）的 Release，第一次运行会把那个 tag 指到这次提交。
+      # 推送 tag 时挂到该 tag 的 Release；推 main 或手动触发时挂到固定 tag
       - name: 发布到 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -149,13 +155,48 @@ jobs:
           if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
-            TAG="v0.2.41-nuwa"
+            TAG="v0.2.49-nuwa"
           fi
           echo "发布到 $TAG"
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --target "$GITHUB_SHA" --title "Skyward for Xiaomi 13 Pro (nuwa) $TAG" \
-              --notes "由 GitHub Actions 在 \`$GITHUB_SHA\` 上构建。解密 data 要的厂商服务见 devices/nuwa.toml 与 docs/开发记录.md。"
-          # 只留一份镜像：先删掉旧的 .img，再传新的
-          gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep '\.img$' | \
+              --notes "由 GitHub Actions 在 \`$GITHUB_SHA\` 上构建（上游 kirklin/skyward + mariusarva/skyward-pudding 补丁 + 本仓库补丁）。解密 data 的厂商服务见 devices/nuwa.toml 与 docs/开发记录.md。"
+          # 只留一份：先删掉旧的 .img / .zip
+          gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -E '\.(img|zip)$' | \
             while read -r old; do gh release delete-asset "$TAG" "$old" -y || true; done
-          gh release upload "$TAG" skyward-nuwa-*.img SHA256SUMS --clobber
+          gh release upload "$TAG" skyward-nuwa-*.img skyward-nuwa-*.zip SHA256SUMS --clobber
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+      # 恢复里的「版本更新」读 docs/update.json：写成这一版，推回去
+      - name: 写 docs/update.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="${{ env.TAG }}"
+          NAME="${{ env.NAME }}"
+          ZIP="${{ env.ZIP }}"
+          SIZE=$(stat -c %s "$ZIP")
+          DIGEST=$(sha256sum "$ZIP" | cut -d' ' -f1)
+          RAW="https://github.com/qq3411cc/skyward-nuwa/releases/download/$TAG/$ZIP"
+          python3 - "$TAG" "$ZIP" "$SIZE" "$DIGEST" "$RAW" <<'PY'
+          import json, sys
+          tag, name, size, digest, raw = sys.argv[1:6]
+          doc = {
+              "tag_name": tag,
+              "assets": [{
+                  "name": name,
+                  "size": int(size),
+                  "digest": "sha256:" + digest,
+                  "url": "https://gh-proxy.com/" + raw,
+                  "browser_download_url": raw,
+              }],
+          }
+          open("docs/update.json", "w").write(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+          PY
+          cat docs/update.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/update.json
+          git commit -m "update.json: $TAG（$ZIP）[skip ci]" || echo "没有变化"
+          git push

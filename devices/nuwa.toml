@@ -200,6 +200,10 @@ probe = "http://connect.rom.miui.com/generate_204"
 # The update server the stock updater of the Chinese system asks.
 [update]
 server = "https://update.miui.com/updates/miotaV3.php"
+# 恢复里「版本更新」问的是本仓库的 docs/update.json，不是上游：上游的包是 pudding
+# 的，装上去会把这份的改动全冲掉。走 gh-proxy 镜像，直连 raw.githubusercontent 在
+# 国内经常拉不动。
+skyward = "https://gh-proxy.com/https://raw.githubusercontent.com/qq3411cc/skyward-nuwa/main/docs/update.json"
 
 # The stock build the recovery is made on: the Chinese system's
 # OS3.0.312.0, whose full update package on the phone maker's own download

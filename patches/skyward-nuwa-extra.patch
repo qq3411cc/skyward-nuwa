@@ -1,6 +1,6 @@
 --- a/crates/skyward/src/main.rs
 +++ b/crates/skyward/src/main.rs
-@@ -511,16 +511,30 @@
+@@ -543,16 +543,30 @@
      // The drivers ask for their firmware by name, and the kernel looks only
      // in folders of its own unless told to pass on what it does not find
      // there to ueventd, which looks in the recovery's firmware folders.
@@ -37,7 +37,7 @@
      }
      skyward_ui::progress::reached(skyward_ui::progress::DRIVERS);
      // The WLAN's driver takes about eleven seconds to make its interface.
-@@ -637,6 +651,30 @@
+@@ -669,6 +683,30 @@
  #[cfg(target_os = "android")]
  const NOBODY: u32 = u32::MAX;
  
@@ -68,7 +68,7 @@
  /// The switch that has the kernel pass the firmware requests it cannot
  /// answer itself on to ueventd.
  #[cfg(target_os = "android")]
-@@ -704,6 +742,7 @@
+@@ -736,6 +774,7 @@
          std::fs::set_permissions(skyward_sys::RUN, std::fs::Permissions::from_mode(0o755))
              .with_context(|| format!("open {} to the recovery's other users", skyward_sys::RUN))?;
          skyward_sys::keep_log(Path::new(skyward_sys::LOG))?;
@@ -78,9 +78,9 @@
          if skyward_sys::prop("sys.usb.state").is_some_and(|s| s != "adb") {
 --- a/crates/skyward/src/services.rs
 +++ b/crates/skyward/src/services.rs
-@@ -42,7 +42,8 @@
-     let known = ueventd::accounts(&ueventd::PASSWD_FILES.iter().chain(&ueventd::GROUP_FILES).copied().collect::<Vec<_>>());
-     for s in services {
+@@ -58,7 +58,8 @@
+             }
+         }
          if !Path::new(&s.path).is_file() {
 -            bail!("{} is missing; is its partition mounted?", s.path);
 +            skyward_sys::kmsg(&format!("{} is missing; is its partition mounted?", s.path))?;
@@ -88,30 +88,29 @@
          }
          let mut s = s.clone();
          if let Some(dir) = libraries {
-@@ -51,14 +52,20 @@
+@@ -66,14 +67,20 @@
+         }
          let who = Credentials::of(&s, &known)?;
          if s.oneshot {
++            // One that ends badly is a reason in the log, not the end of the
++            // ones after it.
              let status = command(&s, &who).status().with_context(|| format!("run {}", s.path))?;
 -            ensure!(status.success(), "{} {} ended: {status}", s.path, s.args.join(" "));
 -            skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
-+            if !status.success() {
-+                skyward_sys::kmsg(&format!("{} {} ended: {status}", s.path, s.args.join(" ")))?;
-+            } else {
++            if status.success() {
 +                skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
++            } else {
++                skyward_sys::kmsg(&format!("{} {} ended: {status}", s.path, s.args.join(" ")))?;
 +            }
              continue;
          }
          let waiting = s.clone();
          let name = Path::new(&s.path).file_name().map_or_else(|| s.path.clone(), |n| n.to_string_lossy().into_owned());
          thread::Builder::new().name(name).spawn(move || supervise(&s, &who)).context("start a supervising thread")?;
--        ready(&waiting)?;
-+        skyward_sys::kmsg(&format!("started {}", waiting.path))?;
-+        if let Err(e) = ready(&waiting) {
-+            skyward_sys::kmsg(&format!("not ready: {e:#}"))?;
-+        }
-     }
-     Ok(())
- }
++        let _ = skyward_sys::kmsg(&format!("started {}", waiting.path));
+         // A service that does not come up leaves its feature missing, not the
+         // whole recovery: what follows is said and the next one is started.
+         if let Err(e) = ready(&waiting) {
 --- a/crates/skyward-crypto/src/data.rs
 +++ b/crates/skyward-crypto/src/data.rs
 @@ -151,9 +151,13 @@
@@ -209,7 +208,7 @@
      let wrapped = crate::fscrypt::hardware_wrapped(mode.trim());
      let users = users()?;
      for user in &users {
-@@ -586,7 +624,11 @@
+@@ -604,7 +642,11 @@
      let synthetic_password = crate::user::open_inner(&secret, &inner)?;
      let file_secret = crate::user::file_secret(&synthetic_password);
  
