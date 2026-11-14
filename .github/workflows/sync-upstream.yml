@@ -52,14 +52,17 @@ jobs:
             NEW=$(gh api "repos/$REPO/contents/patches" --paginate -q '.[].name' \
               | grep -E '^skyward-pudding-v[0-9]+\.[0-9]+\.[0-9]+\.patch$' | sort -V | tail -1)
           fi
-          echo "钉的：$PINNED   上游最新：$NEW"
+          # 钉的路径带 patches/ 前缀，API 列出来的是裸文件名：两边都取 basename 再比
+          PINNED_BASE=$(basename "$PINNED")
+          NEW_BASE=$(basename "$NEW")
+          echo "钉的：$PINNED_BASE   上游最新：$NEW_BASE"
           COMMIT=$(gh api "repos/$REPO/commits?per_page=1" -q '.[0].sha')
           echo "上游提交：$COMMIT"
-          echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
-          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "pinned=$PINNED_BASE" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW_BASE" >> "$GITHUB_OUTPUT"
           echo "repo=$REPO" >> "$GITHUB_OUTPUT"
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
-          if [ "patches/$PINNED" = "$NEW" ] || [ "$PINNED" = "$NEW" ]; then
+          if [ "$PINNED_BASE" = "$NEW_BASE" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -75,8 +78,7 @@ jobs:
           BASE_SHA=$(jq -r '.base.tarball_sha256 // ""' upstream.json)
           REPO="${{ steps.up.outputs.repo }}"
           COMMIT="${{ steps.up.outputs.commit }}"
-          PATH_IN_REPO="${{ steps.up.outputs.new }}"
-          case "$PATH_IN_REPO" in patches/*) URL_PATH="$PATH_IN_REPO" ;; *) URL_PATH="patches/$PATH_IN_REPO" ;; esac
+          URL_PATH="patches/${{ steps.up.outputs.new }}"
 
           curl -fL --retry 3 -o upstream.tar.gz "https://codeload.github.com/$BASE_REPO/tar.gz/refs/tags/$BASE_TAG"
           if [ -n "$BASE_SHA" ]; then echo "$BASE_SHA  upstream.tar.gz" | sha256sum -c -; fi
@@ -114,6 +116,11 @@ jobs:
           jq --arg c "$COMMIT" --arg p "$PATH_IN_REPO" --arg s "$PSHA" \
             '.patches.commit = $c | .patches.path = $p | .patches.sha256 = $s' upstream.json > upstream.json.new
           mv upstream.json.new upstream.json
+          # 内容没变就别提交（上次就是这里空提交、set -e 把整步弄红的）
+          if git diff --quiet -- upstream.json; then
+            echo "pin 与上游一致，没有要改的，结束"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add upstream.json
