@@ -44,7 +44,7 @@ post_boot → touch_report → touchsensor
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 a
-fastboot flash recovery_a skyward-nuwa-<日期>-<发布号>-OS4.0.5.0.XPCCNXM.img
+fastboot flash recovery_a skyward-v<发布号>-nuwa-OS4.0.5.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进
 ```
@@ -141,20 +141,21 @@ scripts/sync-upstream.sh v0.2.52 --write  # 打得进去就写回 upstream.json
 
 合完冲突后重出补丁的办法见 `docs/开发记录.md`。
 
-## 恢复里的「版本更新」
+## 版本号与「版本更新」
 
-`devices/nuwa.toml` 的 `[update] skyward` 指向**本仓库**的 `docs/update.json`（走 `gh-proxy.com` 镜像）：
+发布号（写进二进制的 `SKYWARD_RELEASE`）**对齐 mariusarva/skyward-pudding 最新的 release tag**，当前是 `0.3.9`。代码补丁仍停在 `v0.2.55`——pudding 从 v0.2.56 起没再往 `patches/` 放补丁文件，v0.2.56 / v0.3.9 的改动只在 release 说明里，拿不到 diff。版本号对齐、代码滞后，这件事写在 `docs/开发记录.md` 里。
 
-```toml
-[update]
-skyward = "https://gh-proxy.com/https://raw.githubusercontent.com/qq3411cc/skyward-nuwa/main/docs/update.json"
-```
+恢复里点「版本更新」问的是 **`https://api.github.com/repos/qq3411cc/skyward-nuwa/releases/latest`**：
 
-这个文件由 CI 每次构建后自动改写（tag、zip 的名字、大小、sha256、两个下载地址），所以恢复里点「版本更新」看到的就是本仓库最新那版。**不要**让它去问上游：上游的包是 pudding 的，装上去会把这份的改动全冲掉。
+- pudding 的补丁把更新地址硬编码成了 `github.rs` 的 `LATEST` 常量（`Task::CheckSkyward` 也不带 `at`），所以 `devices/nuwa.toml` 的 `[update] skyward` 不会被读；
+- 本仓库补丁把那个常量改成了本仓库的 `releases/latest`；
+- 资产名必须符合更新器的规则 `skyward-{tag}-{codename}-`，即 `skyward-v0.3.9-nuwa-OS4.0.5.0.XPCCNXM.zip`，Release tag 就是 `v0.3.9`。
+
+`docs/update.json` 仍由 CI 改写，但已经没人读它，留着是为了上游哪天恢复「可配置更新源」时能直接接上。
 
 ## 用 GitHub Actions 构建
 
-`.github/workflows/build.yml`：按 tag（`v*`）或手动触发，整份镜像在 GitHub 的机器上编出来，产出 `skyward-nuwa-<日期>-<tag>-OS4.0.5.0.XPCCNXM.img` + `SHA256SUMS`；tag 触发时自动挂到该 tag 的 Release。不需要任何 secret。
+`.github/workflows/build.yml`：推 `main`、打 tag（`v*`）或手动触发，整份镜像在 GitHub 的机器上编出来，产出 `skyward-v<发布号>-nuwa-OS4.0.5.0.XPCCNXM.img`（+ 只含该 img 的 `.zip`）+ `SHA256SUMS`，挂到 `v<发布号>` 那个 Release。不需要任何 secret。
 
 ## 已知限制
 
