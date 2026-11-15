@@ -3,8 +3,8 @@
   "assets": [
     {
       "name": "skyward-nuwa-20261115-0.2.55-OS4.0.5.0.XPCCNXM.zip",
-      "size": 43647701,
-      "digest": "sha256:5b01deb85e770c277e21eafed1b731b3fbdeacf32624611d7637d37dce07e7e4",
+      "size": 43647616,
+      "digest": "sha256:379bfb9fe114d02e1db9119355803c34c2873338a08183ea9dad3dedf83694a6",
       "url": "https://gh-proxy.com/https://github.com/qq3411cc/skyward-nuwa/releases/download/v0.2.55-nuwa/skyward-nuwa-20261115-0.2.55-OS4.0.5.0.XPCCNXM.zip",
       "browser_download_url": "https://github.com/qq3411cc/skyward-nuwa/releases/download/v0.2.55-nuwa/skyward-nuwa-20261115-0.2.55-OS4.0.5.0.XPCCNXM.zip"
     }
