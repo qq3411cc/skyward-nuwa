@@ -120,7 +120,8 @@ jobs:
           cd src
           mkdir -p ../stock
           ./target/release/skyward-pack stock --config devices/nuwa.toml --out ../stock/recovery.img
-          NAME="skyward-nuwa-$(date +%Y%m%d)-$RELEASE-OS4.0.5.0.XPCCNXM.img"
+          # 名字要符合 Skyward 更新器的规则：skyward-{tag}-{codename}-，tag 即 v$RELEASE
+          NAME="skyward-v${RELEASE}-nuwa-OS4.0.5.0.XPCCNXM.img"
           ./target/release/skyward-pack recovery \
             --stock ../stock/recovery.img \
             --binary target/aarch64-linux-android/release/skyward \
@@ -142,8 +143,8 @@ jobs:
         with:
           name: image
           path: |
-            skyward-nuwa-*.img
-            skyward-nuwa-*.zip
+            skyward-*.img
+            skyward-*.zip
             SHA256SUMS
 
       # 推送 tag 时挂到该 tag 的 Release；推 main 或手动触发时挂到固定 tag
@@ -155,7 +156,7 @@ jobs:
           if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
-            TAG="v0.2.55-nuwa"
+            TAG="v${RELEASE}"
           fi
           echo "发布到 $TAG"
           gh release view "$TAG" >/dev/null 2>&1 || \
@@ -164,7 +165,7 @@ jobs:
           # 只留一份：先删掉旧的 .img / .zip
           gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -E '\.(img|zip)$' | \
             while read -r old; do gh release delete-asset "$TAG" "$old" -y || true; done
-          gh release upload "$TAG" skyward-nuwa-*.img skyward-nuwa-*.zip SHA256SUMS --clobber
+          gh release upload "$TAG" skyward-*.img skyward-*.zip SHA256SUMS --clobber
           echo "TAG=$TAG" >> "$GITHUB_ENV"
 
       # 恢复里的「版本更新」读 docs/update.json：写成这一版，推回去

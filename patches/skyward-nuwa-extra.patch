@@ -241,3 +241,15 @@
      c.clear(p.page);
      let below = Path::new(folder).components().filter_map(|part| match part {
          Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+
+--- a/crates/skyward-net/src/github.rs
++++ b/crates/skyward-net/src/github.rs
+@@ -5,7 +5,7 @@
+ use serde::Deserialize;
+ 
+ /// Where GitHub answers which release of Skyward is the newest.
+-pub const LATEST: &str = "https://api.github.com/repos/mariusarva/skyward-pudding/releases/latest";
++pub const LATEST: &str = "https://api.github.com/repos/qq3411cc/skyward-nuwa/releases/latest";
+ 
+ /// The version of GitHub's API the answer is read as.
+ const API_VERSION: &str = "2022-11-28";
