@@ -1,14 +1,14 @@
 {
   "base": {
     "repository": "kirklin/skyward",
-    "tag": "v0.2.0",
-    "tarball_sha256": "f46e0da3703af12c0c0182d46a60e757a357aed8ae5b9582f637ed23f121d68c"
+    "tag": "v0.3.1",
+    "tarball_sha256": "4b5e8570c09ed510c3f72eca4123b4d3679d107f23e7eb1abf37201ed8421371"
   },
   "patches": {
     "repository": "mariusarva/skyward-pudding",
-    "commit": "ab6cf82cda6cef28457ae845901babf1c17dd0bb",
-    "path": "patches/skyward-pudding-v0.2.49.patch",
-    "sha256": "20f169da07c912f5a5f9bdbae2df1e8bd4778fd8a2d9254d8af63f690dda6f9e"
+    "commit": "b559ed3c9d1e907b64d2eb2f15112f13190750a7",
+    "path": "patches/skyward-pudding-v0.2.55.patch",
+    "sha256": "34a33319ed9bb7e67893bce56dfcb1bc84ef86e631e2cf3ea9447e680d19a181"
   },
   "note": "base 是拿来编的上游源码（kirklin/skyward 的 tag + 源码包哈希）；patches 是 mariusarva/skyward-pudding 的补丁（按提交与文件钉死，哈希对不上构建就失败）。同步流程只改这两个对象里的字段。"
 }

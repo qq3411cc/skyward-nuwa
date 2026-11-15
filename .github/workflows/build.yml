@@ -18,7 +18,7 @@ on:
       release:
         description: '写进二进制的发布号，例如 0.2.49'
         required: true
-        default: '0.2.49'
+        default: '0.2.55'
 
 permissions:
   contents: write
@@ -97,7 +97,7 @@ jobs:
           if [ -z "$RELEASE" ]; then
             case "$GITHUB_REF" in
               refs/tags/*) RELEASE="${GITHUB_REF#refs/tags/}" ;;
-              *) RELEASE="0.2.49" ;;
+              *) RELEASE="0.2.55" ;;
             esac
           fi
           RELEASE="${RELEASE#v}"
@@ -155,7 +155,7 @@ jobs:
           if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
-            TAG="v0.2.49-nuwa"
+            TAG="v0.2.55-nuwa"
           fi
           echo "发布到 $TAG"
           gh release view "$TAG" >/dev/null 2>&1 || \

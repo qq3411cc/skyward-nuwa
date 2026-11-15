@@ -69,13 +69,13 @@ sha256sum -c SHA256SUMS
 
 ```sh
 # 1) 取上游
-curl -L -o skyward.tar.gz https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/v0.2.0
-tar xzf skyward.tar.gz && cd skyward-0.2.0
+curl -L -o skyward.tar.gz https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/v0.3.1
+tar xzf skyward.tar.gz && cd skyward-0.3.1
 
 # 2) 打补丁（mariusarva/skyward-pudding 那一份，按提交钉死），再打本仓库的补丁
 curl -L -o ../skyward.patch \
-  https://raw.githubusercontent.com/mariusarva/skyward-pudding/ab6cf82cda6cef28457ae845901babf1c17dd0bb/patches/skyward-pudding-v0.2.49.patch
-echo "20f169da07c912f5a5f9bdbae2df1e8bd4778fd8a2d9254d8af63f690dda6f9e  ../skyward.patch" | sha256sum -c -
+  https://raw.githubusercontent.com/mariusarva/skyward-pudding/b559ed3c9d1e907b64d2eb2f15112f13190750a7/patches/skyward-pudding-v0.2.55.patch
+echo "34a33319ed9bb7e67893bce56dfcb1bc84ef86e631e2cf3ea9447e680d19a181  ../skyward.patch" | sha256sum -c -
 patch -p1 < ../skyward.patch
 patch -p1 < ../patches/skyward-nuwa-extra.patch
 cp ../devices/nuwa.toml devices/nuwa.toml
@@ -116,9 +116,9 @@ python3 tools/payload_get.py "<ota.zip 直链>" recovery recovery_stock.img \
 
 ```json
 {
-  "base":    { "repository": "kirklin/skyward", "tag": "v0.2.0", "tarball_sha256": "f46e0da3…" },
+  "base":    { "repository": "kirklin/skyward", "tag": "v0.3.1", "tarball_sha256": "4b5e8570…" },
   "patches": { "repository": "mariusarva/skyward-pudding", "commit": "ab6cf82…",
-               "path": "patches/skyward-pudding-v0.2.49.patch", "sha256": "20f169da…" }
+               "path": "patches/skyward-pudding-v0.2.55.patch", "sha256": "34a33319…" }
 }
 ```
 
