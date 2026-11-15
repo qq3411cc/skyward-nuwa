@@ -192,7 +192,7 @@
 +                Some((p, top)) => {
 +                    // 列表从内容顶部开始；页面滚起来时，条与列表之间那段也要盖上，
 +                    // 否则跨在边界上的第一行会露出半截。
-+                    let rows_top = (frame.top - offset).max(top + p.canvas.h as f32);
++                    let rows_top = (frame.content_top - offset).max(top + p.canvas.h as f32);
 +                    widgets::strip_mask(out, t, frame.bg, bar, top.round(), rows_top.round())
 +                }
                  None => {
