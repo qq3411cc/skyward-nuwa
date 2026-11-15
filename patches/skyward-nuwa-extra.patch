@@ -182,6 +182,18 @@
      let y = widgets::section(&mut c, t, f, y, l.pick(["在线更新", "線上更新", "Online update"]));
      let y = skyward_online(&mut c, cx, y, &mut out);
      let points = [
+@@ -3469,7 +3470,10 @@
+         (None, Ok(entries)) => Some(files::rows(t, f, entries, action)),
+     };
+     let pinned = Some(files::strip(t, f, top, &folder.path));
+-    Frame { bg, rows, pinned, ..Frame::new(t, c, Vec::new(), title, t.m.dp(files::STRIP_TOP_DP)) }
++    // 条画在 STRIP_TOP_DP 往下 STRIP_H_DP 的地方；列表要从它下面开始，
++    // 否则第一行会被路径条与排序条盖住（原来两者都从同一个 y 起算）。
++    let rows_top = t.m.dp(files::STRIP_TOP_DP) + t.m.dp(files::STRIP_H_DP);
++    Frame { bg, rows, pinned, ..Frame::new(t, c, Vec::new(), title, rows_top) }
+ }
+ 
+ /// Row `i` of the page's long list over the whole of `c`, sized for it,
 --- a/crates/skyward-ui/src/app/draw.rs
 +++ b/crates/skyward-ui/src/app/draw.rs
 @@ -626,7 +626,12 @@
@@ -198,3 +210,23 @@
                  None => {
                      let stops = if frame.hero.is_some() { &widgets::ABOUT_BAR_MASK[..] } else { &widgets::BAR_MASK[..] };
                      widgets::bar_mask(out, t, stops, frame.bg, bar);
+--- a/crates/skyward-ui/src/files.rs
++++ b/crates/skyward-ui/src/files.rs
+@@ -17,6 +17,8 @@
+ /// Where the path strip starts on an unscrolled page; scrolled up to the
+ /// bar, it stays right under it.
+ pub const STRIP_TOP_DP: f32 = 164.0;
++/// 条本身的高度（含排序那一排）。列表要从它下面开始，否则第一行被盖住。
++pub const STRIP_H_DP: f32 = STRIP_DP + 44.0;
+ const STRIP_DP: f32 = 51.0;
+ const PILL_TOP_DP: f32 = 13.0;
+ const PILL_DP: f32 = 33.0;
+@@ -444,7 +446,7 @@
+     let m = &t.m;
+     let p = palette(t);
+     // Tall enough for the sort row drawn under the pills.
+-    let mut c = Canvas::new(m.w, m.dp(STRIP_DP + 44.0).round() as u32);
++    let mut c = Canvas::new(m.w, m.dp(STRIP_H_DP).round() as u32);
+     c.clear(p.page);
+     let below = Path::new(folder).components().filter_map(|part| match part {
+         Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
