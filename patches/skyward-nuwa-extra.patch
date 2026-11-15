@@ -244,11 +244,17 @@
 
 --- a/crates/skyward-net/src/github.rs
 +++ b/crates/skyward-net/src/github.rs
-@@ -5,7 +5,7 @@
+@@ -5,11 +5,9 @@
  use serde::Deserialize;
  
  /// Where GitHub answers which release of Skyward is the newest.
+-/// Our own releases, not upstream's: upstream's newest is ahead of this fork
+-/// in its numbering and carries builds this phone does not run, and the page
+-/// offered it as the newest. Our zips are named `skyward-v<tag>-pudding-…`, so
+-/// the codename match below finds them.
 -pub const LATEST: &str = "https://api.github.com/repos/mariusarva/skyward-pudding/releases/latest";
++/// 本仓库的发布，不是上游的：上游的编号在这个 fork 之前，且带的是这台机器不跑的构建。
++/// 资产名按 `skyward-v<tag>-nuwa-…` 命名，下面的 codename 匹配才找得到。
 +pub const LATEST: &str = "https://api.github.com/repos/qq3411cc/skyward-nuwa/releases/latest";
  
  /// The version of GitHub's API the answer is read as.
