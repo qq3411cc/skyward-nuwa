@@ -221,7 +221,18 @@
  const STRIP_DP: f32 = 51.0;
  const PILL_TOP_DP: f32 = 13.0;
  const PILL_DP: f32 = 33.0;
-@@ -444,7 +446,7 @@
+@@ -26,7 +28,9 @@
+ const ARROW_GAP_DP: f32 = 6.0;
+ const ARROW_DP: f32 = 14.0;
+ /// Where the first row starts on an unscrolled page.
+-pub const ROWS_TOP_DP: f32 = 223.7;
++/// 第一行的顶：紧接在路径条与排序条下面。原来写死 223.7，比条本身（顶 164 +
++/// 高 95 = 259）还高 35 dp，于是第一行的图标与名称被不透明的条盖住，只剩下半截。
++pub const ROWS_TOP_DP: f32 = STRIP_TOP_DP + STRIP_H_DP;
+ const ROW_DP: f32 = 72.0;
+ /// What a second line of name adds to a row.
+ const NAME_LINE_DP: f32 = 22.33;
+@@ -444,7 +448,7 @@
      let m = &t.m;
      let p = palette(t);
      // Tall enough for the sort row drawn under the pills.
