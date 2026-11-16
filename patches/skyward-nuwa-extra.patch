@@ -39,6 +39,70 @@
          // A recovery that ended with a function of its own in the port took
          // the port with it; going through "none" takes that function off.
          if skyward_sys::prop("sys.usb.state").is_some_and(|s| s != "adb") {
+--- a/crates/skyward/src/remember.rs
++++ b/crates/skyward/src/remember.rs
+@@ -37,15 +37,26 @@
+ }
+ 
+ /// Do `work` with the partition writable, and read-only again afterwards.
++///
++/// The partition is mounted read-only and taken away again as soon as it has
++/// been read, so it is often not there when this is called: it is mounted here,
++/// as `read` does, and taken away again afterwards. Writing without that went
++/// to the ramdisk, and the lock was gone at the next start (2026-11-16).
+ fn writable<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
+     let at = Path::new(METADATA);
+     let mounted = skyward_block::mount::is_mount_point(at)?;
+-    if mounted {
+-        skyward_block::mount::remount_writable(at, true).context("make /metadata writable")?;
++    if !mounted
++        && skyward_block::mount::mount_ro(&Path::new(skyward_block::BY_NAME).join("metadata"), at)
++            .is_err()
++    {
++        return work();
+     }
+-    let done = work();
+-    if mounted {
+-        let _ = skyward_block::mount::remount_writable(at, false);
++    let done = skyward_block::mount::remount_writable(at, true)
++        .context("make /metadata writable")
++        .and_then(|()| work());
++    let _ = skyward_block::mount::remount_writable(at, false);
++    if !mounted {
++        let _ = skyward_block::mount::umount(at);
+     }
+     done
+ }
+@@ -78,17 +89,19 @@
+ pub const OPTED_OUT: &str = "/metadata/skyward/no-remember";
+ 
+ /// Leave the mark that the switch was turned off.
+-pub fn opt_out() -> std::io::Result<()> {
+-    let _ = skyward_block::mount::remount_writable(std::path::Path::new("/metadata"), true);
+-    let written = std::fs::write(OPTED_OUT, b"");
+-    let _ = skyward_block::mount::remount_writable(std::path::Path::new("/metadata"), false);
+-    written
++///
++/// Written the same way as the lock itself: through `writable`, which mounts the
++/// partition when it is not there. Writing it to a ramdisk that is not the
++/// partition left the switch's choice forgotten at the next start (2026-11-16).
++pub fn opt_out() -> Result<()> {
++    writable(|| std::fs::write(OPTED_OUT, b"").with_context(|| format!("write {OPTED_OUT}")))
+ }
+ 
+ /// Take the mark away: the switch was turned on.
+-pub fn opt_in() -> std::io::Result<()> {
+-    let _ = skyward_block::mount::remount_writable(std::path::Path::new("/metadata"), true);
+-    let taken = std::fs::remove_file(OPTED_OUT).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) });
+-    let _ = skyward_block::mount::remount_writable(std::path::Path::new("/metadata"), false);
+-    taken
++pub fn opt_in() -> Result<()> {
++    writable(|| match std::fs::remove_file(OPTED_OUT) {
++        Ok(()) => Ok(()),
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
++        Err(e) => Err(e).with_context(|| format!("remove {OPTED_OUT}")),
++    })
+ }
 --- a/crates/skyward/src/services.rs
 +++ b/crates/skyward/src/services.rs
 @@ -60,11 +60,22 @@
@@ -135,7 +199,7 @@
  const API_VERSION: &str = "2022-11-28";
 --- a/crates/skyward-ui/src/app/draw.rs
 +++ b/crates/skyward-ui/src/app/draw.rs
-@@ -720,7 +720,12 @@
+@@ -724,7 +724,12 @@
              match strip {
                  // The strip under the bar is veiled with it, and the list
                  // thins out below the strip.
@@ -151,23 +215,22 @@
                      widgets::bar_mask(out, t, stops, frame.bg, bar);
 --- a/crates/skyward-ui/src/avatar.rs
 +++ b/crates/skyward-ui/src/avatar.rs
-@@ -128,16 +128,46 @@
- pub fn device_name(path: &Path) -> Option<String> {
-     // The name the phone shows at the top of its settings is the Bluetooth one:
-     // `device_name` in the global settings is the model ("Xiaomi 17"), which
--    // every phone of the model shares.
--    named(path, b"bluetooth_name").or_else(|| named(path, b"device_name"))
-+    // every phone of the model shares. Some systems leave a package there
-+    // instead of a name (`com.xiaomi.bluetooth`), so one that reads as a package
-+    // is passed over; the model is the last resort, and it is kept in the
-+    // global settings rather than the file asked.
-+    named(path, b"bluetooth_name")
+@@ -132,15 +132,46 @@
+ /// Where that is absent the settings' own `device_name` is read; where nothing
+ /// is kept at all, the caller falls back to the model.
+ pub fn device_name(secure: &Path) -> Option<String> {
+-    named(secure, b"bluetooth_name").or_else(|| named(secure, b"device_name"))
++    // Some systems leave a package here instead of a name
++    // (`com.xiaomi.bluetooth`), so one that reads as a package is passed over.
++    // The secure file usually holds no `device_name` of its own, and the model
++    // is kept in the global one.
++    named(secure, b"bluetooth_name")
 +        .filter(|name| !reads_as_a_package(name))
-+        .or_else(|| named(path, b"device_name"))
++        .or_else(|| named(secure, b"device_name"))
 +        .or_else(|| named(Path::new(GLOBAL_SETTINGS), b"device_name"))
 +}
 +
-+/// Where the model is kept when the file asked holds no name of its own.
++/// Where the model is kept when the secure file holds no name of its own.
 +const GLOBAL_SETTINGS: &str = "/data/system/users/0/settings_global.xml";
 +
 +/// `com.xiaomi.bluetooth` 这种：全是小写字母、数字与点，且带点，是包名而不是名字。
@@ -204,7 +267,7 @@
      while i < bytes.len() && bytes[i] == b'/' {
 --- a/crates/skyward-ui/src/pages.rs
 +++ b/crates/skyward-ui/src/pages.rs
-@@ -344,7 +344,8 @@
+@@ -359,7 +359,8 @@
      out.extend(hits(&footer.rows, &footer_opens));
      // However little it holds, the page scrolls far enough to fold its bar
      // away.
