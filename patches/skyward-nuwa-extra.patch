@@ -149,6 +149,59 @@
                  None => {
                      let stops = if frame.hero.is_some() { &widgets::ABOUT_BAR_MASK[..] } else { &widgets::BAR_MASK[..] };
                      widgets::bar_mask(out, t, stops, frame.bg, bar);
+--- a/crates/skyward-ui/src/avatar.rs
++++ b/crates/skyward-ui/src/avatar.rs
+@@ -128,16 +128,46 @@
+ pub fn device_name(path: &Path) -> Option<String> {
+     // The name the phone shows at the top of its settings is the Bluetooth one:
+     // `device_name` in the global settings is the model ("Xiaomi 17"), which
+-    // every phone of the model shares.
+-    named(path, b"bluetooth_name").or_else(|| named(path, b"device_name"))
++    // every phone of the model shares. Some systems leave a package there
++    // instead of a name (`com.xiaomi.bluetooth`), so one that reads as a package
++    // is passed over; the model is the last resort, and it is kept in the
++    // global settings rather than the file asked.
++    named(path, b"bluetooth_name")
++        .filter(|name| !reads_as_a_package(name))
++        .or_else(|| named(path, b"device_name"))
++        .or_else(|| named(Path::new(GLOBAL_SETTINGS), b"device_name"))
++}
++
++/// Where the model is kept when the file asked holds no name of its own.
++const GLOBAL_SETTINGS: &str = "/data/system/users/0/settings_global.xml";
++
++/// `com.xiaomi.bluetooth` 这种：全是小写字母、数字与点，且带点，是包名而不是名字。
++fn reads_as_a_package(name: &str) -> bool {
++    name.contains('.')
++        && name
++            .bytes()
++            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.')
+ }
+ 
+ /// The string kept after `key` in the settings file at `path`.
+ fn named(path: &Path, key: &[u8]) -> Option<String> {
+     let bytes = std::fs::read(path).ok()?;
+     // Each string is a zero, the index it is kept at, a zero, its length, and
+-    // its bytes. The name wanted is the one kept just after `key`.
+-    let at = bytes.windows(key.len()).position(|w| w == key)? + key.len();
++    // its bytes. The name wanted is the one kept just after `key` -- but only
++    // where `key` starts a string: the same bytes turn up inside longer keys,
++    // such as `easy_tether_device_name_record_connecting`, and reading on from
++    // there hands back the bytes of some other string.
++    let mut at = None;
++    let mut from = 0;
++    while let Some(found) = bytes[from..].windows(key.len()).position(|w| w == key) {
++        let i = from + found;
++        if i >= 2 && bytes[i - 2] == 0 && bytes[i - 1] as usize == key.len() {
++            at = Some(i + key.len());
++            break;
++        }
++        from = i + 1;
++    }
++    let at = at?;
+     let mut i = at;
+     // A slash may follow the key, as the phone's own format writes it.
+     while i < bytes.len() && bytes[i] == b'/' {
 --- a/crates/skyward-ui/src/pages.rs
 +++ b/crates/skyward-ui/src/pages.rs
 @@ -344,7 +344,8 @@
