@@ -344,3 +344,28 @@
      Frame { back: false, fold: Some(fold), ..Frame::new(t, c.crop_height(height), out, HOME_TITLE, cards_top) }
  }
  
+@@ -731,10 +732,11 @@
+     let (c, l) = (page(cx), cx.state.lang);
+     match &cx.state.data {
+         Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
+-        // Without a lock kept, the page the start opens on is the one to type
+-        // it into: nothing turns while the phone's own parts come up, and the
+-        // keyboard takes nothing until the lock is known.
+-        Data::Closed | Data::Opening if !cx.state.remember => code(cx, c, 0, Keys::Digits, true),
++        // The keyboard is not put up before the lock is known to be needed: the
++        // start would otherwise show it for the seconds the partition takes to
++        // open, and a phone that keeps no lock never needs it at all. The page
++        // says what it is doing instead, and steps aside once the files are
++        // open (2026-11-16).
+         Data::Closed | Data::Opening => data_status(
+             cx,
+             c,
+@@ -746,7 +748,7 @@
+                 l.pick(["正在准备分区与服务", "正在準備分割區與服務", "Bringing the phone's own parts up"])
+             }),
+             None,
+-            Some(cx.state.data_progress),
++            None,
+         ),
+         Data::Open => {
+             let t = cx.t;
