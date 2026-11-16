@@ -18,7 +18,7 @@ on:
       release:
         description: '写进二进制的发布号，例如 0.2.49'
         required: true
-        default: '0.3.9'
+        default: '0.3.7'
 
 permissions:
   contents: write
@@ -97,7 +97,7 @@ jobs:
           if [ -z "$RELEASE" ]; then
             case "$GITHUB_REF" in
               refs/tags/*) RELEASE="${GITHUB_REF#refs/tags/}" ;;
-              *) RELEASE="0.3.9" ;;
+              *) RELEASE="0.3.7" ;;
             esac
           fi
           RELEASE="${RELEASE#v}"
