@@ -1,6 +1,6 @@
 --- a/crates/skyward/src/main.rs
 +++ b/crates/skyward/src/main.rs
-@@ -826,6 +826,30 @@
+@@ -889,6 +889,30 @@
  #[cfg(target_os = "android")]
  const NOBODY: u32 = u32::MAX;
  
@@ -31,7 +31,7 @@
  /// The switch that has the kernel pass the firmware requests it cannot
  /// answer itself on to ueventd.
  #[cfg(target_os = "android")]
-@@ -893,6 +917,7 @@
+@@ -956,6 +980,7 @@
          std::fs::set_permissions(skyward_sys::RUN, std::fs::Permissions::from_mode(0o755))
              .with_context(|| format!("open {} to the recovery's other users", skyward_sys::RUN))?;
          skyward_sys::keep_log(Path::new(skyward_sys::LOG))?;
@@ -116,132 +116,6 @@
      ask_in_turn(host, &servers)
  }
  
---- a/crates/skyward-ui/src/pages.rs
-+++ b/crates/skyward-ui/src/pages.rs
-@@ -20,7 +20,7 @@
- use crate::tr;
- use crate::icons::{self, Icon};
- use crate::widgets::{self, Caption, Detail, Fact, Outline, Row, Spec, SystemCard, SystemMark, Tone, Trail};
--use skyward_info::{DeviceInfo, VERSION};
-+use skyward_info::{DeviceInfo, RUNNING};
- use skyward_install::{Outcome, Reflash, Refusal, Stage};
- use skyward_net::download::Progress;
- use skyward_net::supplicant::Security;
-@@ -170,7 +170,7 @@
- const WLAN_KEEP: Text = ["记住 WiFi 密码", "記住 WiFi 密碼", "Keep the password"];
- const DECRYPT: Text = ["解密", "解密", "Decrypt"];
- const ADVANCED: Text = ["高级工具", "進階工具", "Advanced"];
--const SETTINGS: Text = ["恢复设置", "復原設定", "Settings"];
-+const SETTINGS: Text = ["设置", "設定", "Settings"];
- const REBOOT: Text = ["重启系统", "重新啟動", "Reboot"];
- const ABOUT: Text = ["关于本机", "關於手機", "About phone"];
- const SPECS: Text = ["全部参数与信息", "全部規格與資訊", "All specs"];
-@@ -337,7 +337,8 @@
-     out.extend(hits(&footer.rows, &footer_opens));
-     // However little it holds, the page scrolls far enough to fold its bar
-     // away.
--    let height = fitted(t, footer.bottom).max(t.m.h + fold.span.ceil() as u32);
-+    // 末尾留一格：滚到底时最后一排不该贴着屏幕边被切掉。
-+    let height = fitted(t, footer.bottom + t.m.card_gap).max(t.m.h + fold.span.ceil() as u32);
-     Frame { back: false, fold: Some(fold), ..Frame::new(t, c.crop_height(height), out, HOME_TITLE, cards_top) }
- }
- 
-@@ -420,7 +421,7 @@
-     let debug = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal)]);
-     out.extend(hits(&debug.rows, &[Action::Open(Screen::Terminal)]));
-     y = widgets::section(&mut c, t, f, debug.bottom, l.pick(["关于", "關於", "About"]));
--    let mut rows = vec![Row::new(l.pick(ABOUT)).trail(Trail::Value(VERSION))];
-+    let mut rows = vec![Row::new(l.pick(ABOUT)).trail(Trail::Value(RUNNING))];
-     let mut opens = vec![Action::Open(Screen::About)];
-     if s.offers(Screen::SkywardUpdate) {
-         let row = Row::new(l.pick(SKYWARD_UPDATE));
-@@ -561,7 +562,7 @@
-     let canvas = fit(c, t, bottom);
-     let art = HeroArt {
-         wordmark: widgets::wordmark(t, f, "Skyward", m.dp(233.7), m.dp(37.8)),
--        version: widgets::version_line(t, f, VERSION),
-+        version: widgets::version_line(t, f, RUNNING),
-         author: widgets::author_line(t, f, AUTHOR),
-         runs: canvas.runs(),
-     };
-@@ -660,7 +661,7 @@
-         y = widgets::info_card(&mut c, t, f, y + gap, &[(l.pick(ANDROID_VERSION), fmt::android(l, r, i.security_patch.as_ref()))]);
-     }
-     y = widgets::info_card(&mut c, t, f, y + gap, &[
--        (l.pick(["Recovery 版本", "Recovery 版本", "Recovery version"]), format!("Skyward {VERSION}")),
-+        (l.pick(["Recovery 版本", "Recovery 版本", "Recovery version"]), format!("Skyward {RUNNING}")),
-         (l.pick(["内核版本", "核心版本", "Kernel version"]), i.kernel.clone()),
-     ]);
- 
-@@ -3019,7 +3020,7 @@
-     let top = t.m.content_top;
-     let mut out = Vec::new();
-     let y = widgets::section_first(&mut c, t, f, top, l.pick(["本机", "本機", "This phone"]));
--    let y = widgets::info_card(&mut c, t, f, y, &[(l.pick(["当前版本", "目前版本", "Current version"]), VERSION.to_string())]);
-+    let y = widgets::info_card(&mut c, t, f, y, &[(l.pick(["当前版本", "目前版本", "Current version"]), RUNNING.to_string())]);
-     let y = widgets::section(&mut c, t, f, y, l.pick(["在线更新", "線上更新", "Online update"]));
-     let y = skyward_online(&mut c, cx, y, &mut out);
-     let points = [
-@@ -3469,7 +3470,10 @@
-         (None, Ok(entries)) => Some(files::rows(t, f, entries, action)),
-     };
-     let pinned = Some(files::strip(t, f, top, &folder.path));
--    Frame { bg, rows, pinned, ..Frame::new(t, c, Vec::new(), title, t.m.dp(files::STRIP_TOP_DP)) }
-+    // 条画在 STRIP_TOP_DP 往下 STRIP_H_DP 的地方；列表要从它下面开始，
-+    // 否则第一行会被路径条与排序条盖住（原来两者都从同一个 y 起算）。
-+    let rows_top = t.m.dp(files::STRIP_TOP_DP) + t.m.dp(files::STRIP_H_DP);
-+    Frame { bg, rows, pinned, ..Frame::new(t, c, Vec::new(), title, rows_top) }
- }
- 
- /// Row `i` of the page's long list over the whole of `c`, sized for it,
---- a/crates/skyward-ui/src/app/draw.rs
-+++ b/crates/skyward-ui/src/app/draw.rs
-@@ -626,7 +626,12 @@
-             match strip {
-                 // The strip under the bar is veiled with it, and the list
-                 // thins out below the strip.
--                Some((p, top)) => widgets::strip_mask(out, t, frame.bg, bar, top.round(), top.round() + p.canvas.h as f32),
-+                Some((p, top)) => {
-+                    // 列表从内容顶部开始；页面滚起来时，条与列表之间那段也要盖上，
-+                    // 否则跨在边界上的第一行会露出半截。
-+                    let rows_top = (frame.content_top - offset).max(top + p.canvas.h as f32);
-+                    widgets::strip_mask(out, t, frame.bg, bar, top.round(), rows_top.round())
-+                }
-                 None => {
-                     let stops = if frame.hero.is_some() { &widgets::ABOUT_BAR_MASK[..] } else { &widgets::BAR_MASK[..] };
-                     widgets::bar_mask(out, t, stops, frame.bg, bar);
---- a/crates/skyward-ui/src/files.rs
-+++ b/crates/skyward-ui/src/files.rs
-@@ -17,6 +17,8 @@
- /// Where the path strip starts on an unscrolled page; scrolled up to the
- /// bar, it stays right under it.
- pub const STRIP_TOP_DP: f32 = 164.0;
-+/// 条本身的高度（含排序那一排）。列表要从它下面开始，否则第一行被盖住。
-+pub const STRIP_H_DP: f32 = STRIP_DP + 44.0;
- const STRIP_DP: f32 = 51.0;
- const PILL_TOP_DP: f32 = 13.0;
- const PILL_DP: f32 = 33.0;
-@@ -26,7 +28,9 @@
- const ARROW_GAP_DP: f32 = 6.0;
- const ARROW_DP: f32 = 14.0;
- /// Where the first row starts on an unscrolled page.
--pub const ROWS_TOP_DP: f32 = 223.7;
-+/// 第一行的顶：紧接在路径条与排序条下面。原来写死 223.7，比条本身（顶 164 +
-+/// 高 95 = 259）还高 35 dp，于是第一行的图标与名称被不透明的条盖住，只剩下半截。
-+pub const ROWS_TOP_DP: f32 = STRIP_TOP_DP + STRIP_H_DP;
- const ROW_DP: f32 = 72.0;
- /// What a second line of name adds to a row.
- const NAME_LINE_DP: f32 = 22.33;
-@@ -444,7 +448,7 @@
-     let m = &t.m;
-     let p = palette(t);
-     // Tall enough for the sort row drawn under the pills.
--    let mut c = Canvas::new(m.w, m.dp(STRIP_DP + 44.0).round() as u32);
-+    let mut c = Canvas::new(m.w, m.dp(STRIP_H_DP).round() as u32);
-     c.clear(p.page);
-     let below = Path::new(folder).components().filter_map(|part| match part {
-         Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
-
 --- a/crates/skyward-net/src/github.rs
 +++ b/crates/skyward-net/src/github.rs
 @@ -5,11 +5,9 @@
@@ -259,3 +133,31 @@
  
  /// The version of GitHub's API the answer is read as.
  const API_VERSION: &str = "2022-11-28";
+--- a/crates/skyward-ui/src/app/draw.rs
++++ b/crates/skyward-ui/src/app/draw.rs
+@@ -720,7 +720,12 @@
+             match strip {
+                 // The strip under the bar is veiled with it, and the list
+                 // thins out below the strip.
+-                Some((p, top)) => widgets::strip_mask(out, t, frame.bg, bar, top.round(), top.round() + p.canvas.h as f32),
++                Some((p, top)) => {
++                    // 列表从内容顶部开始；页面滚起来时，条与列表之间那段也要盖上，
++                    // 否则跨在边界上的第一行会露出半截。
++                    let rows_top = (frame.content_top - offset).max(top + p.canvas.h as f32);
++                    widgets::strip_mask(out, t, frame.bg, bar, top.round(), rows_top.round())
++                }
+                 None => {
+                     let stops = if frame.hero.is_some() { &widgets::ABOUT_BAR_MASK[..] } else { &widgets::BAR_MASK[..] };
+                     widgets::bar_mask(out, t, stops, frame.bg, bar);
+--- a/crates/skyward-ui/src/pages.rs
++++ b/crates/skyward-ui/src/pages.rs
+@@ -344,7 +344,8 @@
+     out.extend(hits(&footer.rows, &footer_opens));
+     // However little it holds, the page scrolls far enough to fold its bar
+     // away.
+-    let height = fitted(t, footer.bottom).max(t.m.h + fold.span.ceil() as u32);
++    // 末尾留一格：滚到底时最后一排不该贴着屏幕边被切掉。
++    let height = fitted(t, footer.bottom + t.m.card_gap).max(t.m.h + fold.span.ceil() as u32);
+     Frame { back: false, fold: Some(fold), ..Frame::new(t, c.crop_height(height), out, HOME_TITLE, cards_top) }
+ }
+ 

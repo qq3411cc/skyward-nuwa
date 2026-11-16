@@ -74,8 +74,8 @@ tar xzf skyward.tar.gz && cd skyward-0.3.1
 
 # 2) 打补丁（mariusarva/skyward-pudding 那一份，按提交钉死），再打本仓库的补丁
 curl -L -o ../skyward.patch \
-  https://raw.githubusercontent.com/mariusarva/skyward-pudding/b559ed3c9d1e907b64d2eb2f15112f13190750a7/patches/skyward-pudding-v0.2.55.patch
-echo "34a33319ed9bb7e67893bce56dfcb1bc84ef86e631e2cf3ea9447e680d19a181  ../skyward.patch" | sha256sum -c -
+  https://raw.githubusercontent.com/mariusarva/skyward-pudding/0cf87c884f21228388836ae25370a510b4d2c920/patches/skyward-pudding-v0.3.7.patch
+echo "95ff4eb4890b5c8716f389c43b8db6c8484a53d8b8eb99f950414f5482311d1e  ../skyward.patch" | sha256sum -c -
 patch -p1 < ../skyward.patch
 patch -p1 < ../patches/skyward-nuwa-extra.patch
 cp ../devices/nuwa.toml devices/nuwa.toml
@@ -117,8 +117,8 @@ python3 tools/payload_get.py "<ota.zip 直链>" recovery recovery_stock.img \
 ```json
 {
   "base":    { "repository": "kirklin/skyward", "tag": "v0.3.1", "tarball_sha256": "4b5e8570…" },
-  "patches": { "repository": "mariusarva/skyward-pudding", "commit": "ab6cf82…",
-               "path": "patches/skyward-pudding-v0.2.55.patch", "sha256": "34a33319…" }
+  "patches": { "repository": "mariusarva/skyward-pudding", "commit": "0cf87c88…",
+               "path": "patches/skyward-pudding-v0.3.7.patch", "sha256": "95ff4eb4…" }
 }
 ```
 
@@ -143,13 +143,13 @@ scripts/sync-upstream.sh v0.2.52 --write  # 打得进去就写回 upstream.json
 
 ## 版本号与「版本更新」
 
-发布号（写进二进制的 `SKYWARD_RELEASE`）**对齐 mariusarva/skyward-pudding 最新的 release tag**，当前是 `0.3.9`。代码补丁仍停在 `v0.2.55`——pudding 从 v0.2.56 起没再往 `patches/` 放补丁文件，v0.2.56 / v0.3.9 的改动只在 release 说明里，拿不到 diff。版本号对齐、代码滞后，这件事写在 `docs/开发记录.md` 里。
+发布号（写进二进制的 `SKYWARD_RELEASE`）**对齐 mariusarva/skyward-pudding 最新的 release tag**，当前是 `0.3.7`。代码也同步到同一版：pudding 已发布 `skyward-pudding-v0.3.7.patch`（58 文件，对官方 v0.3.1 零失败），本仓库钉的就是它。
 
 恢复里点「版本更新」问的是 **`https://api.github.com/repos/qq3411cc/skyward-nuwa/releases/latest`**：
 
 - pudding 的补丁把更新地址硬编码成了 `github.rs` 的 `LATEST` 常量（`Task::CheckSkyward` 也不带 `at`），所以 `devices/nuwa.toml` 的 `[update] skyward` 不会被读；
 - 本仓库补丁把那个常量改成了本仓库的 `releases/latest`；
-- 资产名必须符合更新器的规则 `skyward-{tag}-{codename}-`，即 `skyward-v0.3.9-nuwa-OS4.0.5.0.XPCCNXM.zip`，Release tag 就是 `v0.3.9`。
+- 资产名必须符合更新器的规则 `skyward-{tag}-{codename}-`，即 `skyward-v0.3.7-nuwa-OS4.0.5.0.XPCCNXM.zip`，Release tag 就是 `v0.3.7`。
 
 `docs/update.json` 仍由 CI 改写，但已经没人读它，留着是为了上游哪天恢复「可配置更新源」时能直接接上。
 
