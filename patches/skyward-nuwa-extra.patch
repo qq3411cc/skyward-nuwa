@@ -150,6 +150,59 @@
      }
      Ok(())
  }
+--- a/crates/skyward/src/ui.rs
++++ b/crates/skyward/src/ui.rs
+@@ -898,7 +898,13 @@
+         };
+         (c.user, keys)
+     });
++    let nothing_waits = waiting.is_none();
+     app.data_waiting(waiting);
++    if nothing_waits {
++        // Nothing is closed: the decrypt page has nothing to ask, so the menu
++        // is what to show rather than a page saying it is done.
++        app.decrypted();
++    }
+     Ok(())
+ }
+ 
+@@ -2825,10 +2831,11 @@
+                     }
+                 }
+                 self.attempt_was_remembered = false;
+-                self.last_credential = None;
+-                // Everything the recovery can open is open: the decrypt page
+-                // has done its work and the menu is what to show.
+-                if self.closed.is_empty() {
++                // `last_credential` stays: the switch on the decrypt page writes
++                // it out when it is turned on after the files opened.
++                // The owner's own files being open is what the menu needs; the
++                // decrypt page has done its work and steps aside.
++                if self.app.state.data.storage_open() {
+                     skyward_sys::kmsg("the decrypt page is done; the menu shows")?;
+                     self.app.decrypted();
+                 }
+@@ -3242,7 +3249,19 @@
+                     let _ = crate::remember::opt_out();
+                 } else {
+                     let _ = crate::remember::opt_in();
+-                    skyward_sys::kmsg("the screen lock is kept once it opens the user's files")?;
++                    // Turned on after the files opened: what opened them is
++                    // written out here, or nothing would be kept until the next
++                    // start asks for it again.
++                    match self.last_credential.clone() {
++                        Some(credential) => match crate::remember::write(&credential) {
++                            Ok(()) => {
++                                self.remembered = Some(credential);
++                                skyward_sys::kmsg("the screen lock is kept for the starts that follow")?;
++                            }
++                            Err(e) => skyward_sys::kmsg(&format!("the screen lock was not kept: {e:#}"))?,
++                        },
++                        None => skyward_sys::kmsg("the screen lock is kept once it opens the user's files")?,
++                    }
+                 }
+             }
+             Effect::WlanAuto(on) => {
 --- a/crates/skyward-net/src/dns.rs
 +++ b/crates/skyward-net/src/dns.rs
 @@ -13,6 +13,11 @@
@@ -197,6 +250,20 @@
  
  /// The version of GitHub's API the answer is read as.
  const API_VERSION: &str = "2022-11-28";
+--- a/crates/skyward-ui/src/app/decrypt.rs
++++ b/crates/skyward-ui/src/app/decrypt.rs
+@@ -86,7 +86,10 @@
+     /// show. Called once what was entered opened the owner's own files, so that
+     /// the page does not stay in front of a partition that is already open.
+     pub fn decrypted(&mut self) {
+-        if !matches!(self.state.data, Data::Open) {
++        // The owner's own files are what the menu needs: another user's that
++        // still wait on their screen lock are not the menu's business, so the
++        // page steps aside as soon as the owner's are open.
++        if !self.state.data.storage_open() {
+             return;
+         }
+         // The partition is open, so the decrypt page has done its work: the
 --- a/crates/skyward-ui/src/app/draw.rs
 +++ b/crates/skyward-ui/src/app/draw.rs
 @@ -724,7 +724,12 @@
