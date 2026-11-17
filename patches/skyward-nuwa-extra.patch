@@ -152,7 +152,7 @@
  }
 --- a/crates/skyward/src/ui.rs
 +++ b/crates/skyward/src/ui.rs
-@@ -898,7 +898,13 @@
+@@ -906,7 +906,13 @@
          };
          (c.user, keys)
      });
@@ -166,7 +166,7 @@
      Ok(())
  }
  
-@@ -2825,10 +2831,11 @@
+@@ -2841,10 +2847,11 @@
                      }
                  }
                  self.attempt_was_remembered = false;
@@ -182,7 +182,7 @@
                      skyward_sys::kmsg("the decrypt page is done; the menu shows")?;
                      self.app.decrypted();
                  }
-@@ -3242,7 +3249,19 @@
+@@ -3258,7 +3265,19 @@
                      let _ = crate::remember::opt_out();
                  } else {
                      let _ = crate::remember::opt_in();
@@ -266,7 +266,7 @@
          // The partition is open, so the decrypt page has done its work: the
 --- a/crates/skyward-ui/src/app/draw.rs
 +++ b/crates/skyward-ui/src/app/draw.rs
-@@ -724,7 +724,12 @@
+@@ -733,7 +733,12 @@
              match strip {
                  // The strip under the bar is veiled with it, and the list
                  // thins out below the strip.
@@ -334,17 +334,17 @@
      while i < bytes.len() && bytes[i] == b'/' {
 --- a/crates/skyward-ui/src/pages.rs
 +++ b/crates/skyward-ui/src/pages.rs
-@@ -359,7 +359,8 @@
+@@ -354,7 +354,8 @@
      out.extend(hits(&footer.rows, &footer_opens));
      // However little it holds, the page scrolls far enough to fold its bar
      // away.
--    let height = fitted(t, footer.bottom).max(t.m.h + fold.span.ceil() as u32);
+-    let height = fitted(t, footer.bottom).max(t.m.h as u32);
 +    // 末尾留一格：滚到底时最后一排不该贴着屏幕边被切掉。
-+    let height = fitted(t, footer.bottom + t.m.card_gap).max(t.m.h + fold.span.ceil() as u32);
-     Frame { back: false, fold: Some(fold), ..Frame::new(t, c.crop_height(height), out, HOME_TITLE, cards_top) }
++    let height = fitted(t, footer.bottom + t.m.card_gap).max(t.m.h as u32);
+     Frame { back: false, ..Frame::new(t, c.crop_height(height), out, HOME_TITLE, t.m.content_top) }
  }
  
-@@ -731,10 +732,11 @@
+@@ -714,10 +715,11 @@
      let (c, l) = (page(cx), cx.state.lang);
      match &cx.state.data {
          Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
@@ -360,12 +360,3 @@
          Data::Closed | Data::Opening => data_status(
              cx,
              c,
-@@ -746,7 +748,7 @@
-                 l.pick(["正在准备分区与服务", "正在準備分割區與服務", "Bringing the phone's own parts up"])
-             }),
-             None,
--            Some(cx.state.data_progress),
-+            None,
-         ),
-         Data::Open => {
-             let t = cx.t;
