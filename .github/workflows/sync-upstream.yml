@@ -25,6 +25,8 @@ on:
 permissions:
   contents: write
   issues: write
+  # gh workflow run 要这个，否则 403 Resource not accessible by integration
+  actions: write
 
 jobs:
   sync:
