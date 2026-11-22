@@ -99,6 +99,12 @@ jobs:
           printf '#!/bin/sh\nexec "%s" --target=aarch64-linux-android30 --sysroot="%s" -rtlib=compiler-rt -L"%s" "$@"\n' \
             "$CLANG" "$SYSROOT" "$BUILTINS" > /tmp/cc-aarch64.sh
           chmod +x /tmp/cc-aarch64.sh
+          # C++：中文输入法的引擎（third_party/aosp-pinyin）要用 clang++ 编，
+          # cc-rs 默认去找 aarch64-linux-android-clang++，NDK 里没有这个前缀的名字
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+          printf '#!/bin/sh\nexec "%s" --target=aarch64-linux-android30 --sysroot="%s" -rtlib=compiler-rt -L"%s" "$@"\n' \
+            "$CXX" "$SYSROOT" "$BUILTINS" > /tmp/cxx-aarch64.sh
+          chmod +x /tmp/cxx-aarch64.sh
           # 发布号：手动触发与 tag 用它，推 main 时用默认值（不能用 main）
           RELEASE="${{ github.event.inputs.release || '' }}"
           if [ -z "$RELEASE" ]; then
@@ -111,6 +117,7 @@ jobs:
           echo "发布号：$RELEASE"
           echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
           export CC_aarch64_linux_android=/tmp/cc-aarch64.sh
+          export CXX_aarch64_linux_android=/tmp/cxx-aarch64.sh
           export AR_aarch64_linux_android=ar
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/tmp/cc-aarch64.sh
           export SKYWARD_RELEASE="$RELEASE"
