@@ -18,7 +18,7 @@ on:
       release:
         description: '写进二进制的发布号，例如 0.2.49'
         required: true
-        default: '0.3.15'
+        default: '0.3.29'
 
 permissions:
   contents: write
@@ -79,7 +79,14 @@ jobs:
           done
           # 本仓库的设备配置覆盖上游那份：解密 data 要的厂商服务在这里
           cp ../devices/nuwa.toml devices/nuwa.toml
-          echo "补丁打上了，设备配置已换成本仓库的"
+          # 中文输入法的词库：pudding 的补丁里这两个是二进制文件，diff 只写
+          # "Binary files ... differ"，patch 无法重建；不补上的话 crates/skyward-ui
+          # 的 build.rs（pinyin-input 默认开启）会找不到 .txt 而失败。
+          mkdir -p third_party/aosp-pinyin/jni/data
+          cp ../assets/pinyin/rawdict_utf16_65105_freq.txt ../assets/pinyin/valid_utf16.txt \
+             third_party/aosp-pinyin/jni/data/
+          ls -l third_party/aosp-pinyin/jni/data/
+          echo "补丁打上了，设备配置已换成本仓库的，词库已补"
 
       - name: 交叉编译
         run: |
@@ -97,7 +104,7 @@ jobs:
           if [ -z "$RELEASE" ]; then
             case "$GITHUB_REF" in
               refs/tags/*) RELEASE="${GITHUB_REF#refs/tags/}" ;;
-              *) RELEASE="0.3.15" ;;
+              *) RELEASE="0.3.29" ;;
             esac
           fi
           RELEASE="${RELEASE#v}"
