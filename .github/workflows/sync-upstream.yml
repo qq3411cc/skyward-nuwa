@@ -50,18 +50,29 @@ jobs:
           REPO=$(jq -r '.patches.repository' upstream.json)
           if [ -n "$WANTED" ]; then
             NEW="$WANTED"
+            NEW_URL=""
           else
-            NEW=$(gh api "repos/$REPO/contents/patches" --paginate -q '.[].name' \
-              | grep -E '^skyward-pudding-v[0-9]+\.[0-9]+\.[0-9]+\.patch$' | sort -V | tail -1)
+            # 补丁有两个去处：仓库的 patches/ 目录，或者某个 release 的资产
+            # （v0.5.2 就只发了后者，patches/ 里没有）。两处都看，取版本最大。
+            PAT='^skyward-pudding-v[0-9]+\.[0-9]+\.[0-9]+\.patch$'
+            FROM_DIR=$(gh api "repos/$REPO/contents/patches" --paginate -q '.[].name' 2>/dev/null | grep -E "$PAT" || true)
+            FROM_REL=$(gh api "repos/$REPO/releases?per_page=30" --paginate -q '.[].assets[].name' 2>/dev/null | grep -E "$PAT" || true)
+            NEW=$(printf '%s\n%s\n' "$FROM_DIR" "$FROM_REL" | grep -E "$PAT" | sort -V | tail -1)
+            NEW_URL=""
+            if ! printf '%s\n' "$FROM_DIR" | grep -qx "$NEW"; then
+              NEW_URL=$(gh api "repos/$REPO/releases?per_page=30" --paginate \
+                -q ".[] | .assets[] | select(.name == \"$NEW\") | .browser_download_url" 2>/dev/null | head -1 || true)
+            fi
           fi
           # 钉的路径带 patches/ 前缀，API 列出来的是裸文件名：两边都取 basename 再比
           PINNED_BASE=$(basename "$PINNED")
           NEW_BASE=$(basename "$NEW")
-          echo "钉的：$PINNED_BASE   上游最新：$NEW_BASE"
+          echo "钉的：$PINNED_BASE   上游最新：$NEW_BASE   release 资产：${NEW_URL:-（在 patches/ 里）}"
           COMMIT=$(gh api "repos/$REPO/commits?per_page=1" -q '.[0].sha')
           echo "上游提交：$COMMIT"
           echo "pinned=$PINNED_BASE" >> "$GITHUB_OUTPUT"
           echo "new=$NEW_BASE" >> "$GITHUB_OUTPUT"
+          echo "new_url=$NEW_URL" >> "$GITHUB_OUTPUT"
           echo "repo=$REPO" >> "$GITHUB_OUTPUT"
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
           if [ "$PINNED_BASE" = "$NEW_BASE" ]; then
@@ -80,17 +91,25 @@ jobs:
           BASE_SHA=$(jq -r '.base.tarball_sha256 // ""' upstream.json)
           REPO="${{ steps.up.outputs.repo }}"
           COMMIT="${{ steps.up.outputs.commit }}"
-          URL_PATH="patches/${{ steps.up.outputs.new }}"
+          NEW_URL="${{ steps.up.outputs.new_url }}"
 
           curl -fL --retry 3 -o upstream.tar.gz "https://codeload.github.com/$BASE_REPO/tar.gz/refs/tags/$BASE_TAG"
           if [ -n "$BASE_SHA" ]; then echo "$BASE_SHA  upstream.tar.gz" | sha256sum -c -; fi
           mkdir -p src
           tar xzf upstream.tar.gz -C src --strip-components=1
 
-          curl -fL --retry 3 -o pudding.patch "https://raw.githubusercontent.com/$REPO/$COMMIT/$URL_PATH"
+          if [ -n "$NEW_URL" ]; then
+            URL_PATH="${{ steps.up.outputs.new }}"
+            echo "从 release 资产取补丁：$NEW_URL"
+            curl -fL --retry 3 -o pudding.patch "$NEW_URL"
+          else
+            URL_PATH="patches/${{ steps.up.outputs.new }}"
+            curl -fL --retry 3 -o pudding.patch "https://raw.githubusercontent.com/$REPO/$COMMIT/$URL_PATH"
+          fi
           PSHA=$(sha256sum pudding.patch | cut -d' ' -f1)
           echo "patch_sha=$PSHA" >> "$GITHUB_OUTPUT"
           echo "patch_path=$URL_PATH" >> "$GITHUB_OUTPUT"
+          echo "patch_url=$NEW_URL" >> "$GITHUB_OUTPUT"
 
           cd src
           FAILED=0
@@ -115,8 +134,10 @@ jobs:
           COMMIT="${{ steps.up.outputs.commit }}"
           PATH_IN_REPO="${{ steps.try.outputs.patch_path }}"
           PSHA="${{ steps.try.outputs.patch_sha }}"
-          jq --arg c "$COMMIT" --arg p "$PATH_IN_REPO" --arg s "$PSHA" \
-            '.patches.commit = $c | .patches.path = $p | .patches.sha256 = $s' upstream.json > upstream.json.new
+          PURL="${{ steps.try.outputs.patch_url }}"
+          jq --arg c "$COMMIT" --arg p "$PATH_IN_REPO" --arg s "$PSHA" --arg u "$PURL" \
+            '.patches.commit = $c | .patches.path = $p | .patches.sha256 = $s
+             | (if $u == "" then del(.patches.url) else .patches.url = $u end)' upstream.json > upstream.json.new
           mv upstream.json.new upstream.json
           # 内容没变就别提交（上次就是这里空提交、set -e 把整步弄红的）
           if git diff --quiet -- upstream.json; then

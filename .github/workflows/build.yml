@@ -18,7 +18,7 @@ on:
       release:
         description: '写进二进制的发布号，例如 0.2.49'
         required: true
-        default: '0.5.1'
+        default: '0.5.2'
 
 permissions:
   contents: write
@@ -55,6 +55,7 @@ jobs:
           P_REPO=$(read_pin "d['patches']['repository']")
           P_COMMIT=$(read_pin "d['patches']['commit']")
           P_PATH=$(read_pin "d['patches']['path']")
+          P_URL=$(read_pin "d['patches'].get('url','')")
           P_SHA=$(read_pin "d['patches']['sha256']")
           echo "上游：$BASE_REPO $BASE_TAG   补丁：$P_REPO $P_COMMIT $P_PATH"
 
@@ -63,8 +64,14 @@ jobs:
           mkdir -p src
           tar xzf upstream.tar.gz -C src --strip-components=1
 
-          curl -fL --retry 3 -o pudding.patch \
-            "https://raw.githubusercontent.com/$P_REPO/$P_COMMIT/$P_PATH"
+          # 补丁有两种挂法：放在仓库的 patches/ 里，或只作为该仓库某个 release 的
+          # 资产（v0.5.2 就是后者）。upstream.json 里给了 url 就直接用它。
+          if [ -n "$P_URL" ]; then
+            curl -fL --retry 3 -o pudding.patch "$P_URL"
+          else
+            curl -fL --retry 3 -o pudding.patch \
+              "https://raw.githubusercontent.com/$P_REPO/$P_COMMIT/$P_PATH"
+          fi
           echo "$P_SHA  pudding.patch" | sha256sum -c -
 
           cd src
@@ -110,7 +117,7 @@ jobs:
           if [ -z "$RELEASE" ]; then
             case "$GITHUB_REF" in
               refs/tags/*) RELEASE="${GITHUB_REF#refs/tags/}" ;;
-              *) RELEASE="0.5.1" ;;
+              *) RELEASE="0.5.2" ;;
             esac
           fi
           RELEASE="${RELEASE#v}"
