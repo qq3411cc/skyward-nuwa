@@ -1,14 +1,14 @@
 {
   "base": {
     "repository": "kirklin/skyward",
-    "tag": "v0.3.1",
+    "tag": "v0.5.0",
     "tarball_sha256": ""
   },
   "patches": {
     "repository": "mariusarva/skyward-pudding",
-    "commit": "046511644e9051514666b76f8b5a12d92b5e0acd",
-    "path": "patches/skyward-pudding-v0.3.29.patch",
-    "sha256": "5eaf44dc41701b7777797f89a58f25d17566df0e20f99b5f766bcb6b592a1317"
+    "commit": "9c8949b384d6fab646192f47672cd4a51b25a78b",
+    "path": "patches/skyward-pudding-v0.5.1.patch",
+    "sha256": "84e207e1938b009672954dc987484512b3dd4b935a4d74ee08710718dc7fcede"
   },
   "note": "base 是拿来编的上游源码（kirklin/skyward 的 tag）；patches 是 mariusarva/skyward-pudding 的补丁（按提交与文件钉死，哈希对不上构建就失败）。tarball_sha256 留空：codeload 现场打包的 tar.gz 不是逐字节稳定的（同一 tag 两次下载哈希不同，gzip 头 mtime 都是 0 也会变），钉它只会误报；完整性由 tag 与补丁哈希保证。"
 }

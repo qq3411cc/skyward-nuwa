@@ -143,7 +143,7 @@ scripts/sync-upstream.sh v0.2.52 --write  # 打得进去就写回 upstream.json
 
 ## 版本号与「版本更新」
 
-发布号（写进二进制的 `SKYWARD_RELEASE`）**对齐 mariusarva/skyward-pudding 的补丁版本**，当前是 `0.3.29`。代码同步到 pudding 的 `skyward-pudding-v0.3.29.patch`，其中包含控制中心、中文输入法、分区管理、任务页、镜像备份、关机页、录屏、磁贴自定义。中文词库由本仓库 `assets/pinyin/` 补上（pudding 的补丁里那是二进制，patch 重建不了）。
+发布号（写进二进制的 `SKYWARD_RELEASE`）**对齐 mariusarva/skyward-pudding 的补丁版本**，当前是 `0.5.1`。代码 = kirklin/skyward `v0.5.0` + `skyward-pudding-v0.5.1.patch`。中文词库由本仓库 `assets/pinyin/` 补上（pudding 的补丁里那是二进制，patch 重建不了）。
 
 恢复里点「版本更新」问的是 **`https://api.github.com/repos/qq3411cc/skyward-nuwa/releases/latest`**：
 
