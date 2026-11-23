@@ -360,3 +360,25 @@
          Data::Closed | Data::Opening => data_status(
              cx,
              c,
+
+--- a/crates/skyward-crypto/src/encryption.rs
++++ b/crates/skyward-crypto/src/encryption.rs
+@@ -44,9 +44,15 @@
+         }
+         // A table may name only where the key is kept: Android then takes the
+         // cipher it uses where nothing is said, and the key in the form the key
+-        // service gives it back.
+-        if entry.extra("keydirectory").is_some() {
+-            return Ok(Some(Encryption { cipher: "aes-xts-plain64".to_string(), wrapped: false }));
++        // service gives it back. 但这只在那台机器真把分区整盘加密时成立：
++        // 本机（nuwa）的 fstab 同样只给了 keydirectory，分区却是裸 f2fs，
++        // key 目录里什么都没有。所以先看 key 在不在，不在就按没加密处理，
++        // 否则打开流程会停在 read .../key/version: No such file or directory。
++        if let Some(dir) = entry.extra("keydirectory") {
++            let version = Path::new(dir).join(KEY_DIR).join("version");
++            if version.exists() {
++                return Ok(Some(Encryption { cipher: "aes-xts-plain64".to_string(), wrapped: false }));
++            }
+         }
+         Ok(None)
+     }
