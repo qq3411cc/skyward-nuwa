@@ -39,6 +39,7 @@
          // A recovery that ended with a function of its own in the port took
          // the port with it; going through "none" takes that function off.
          if skyward_sys::prop("sys.usb.state").is_some_and(|s| s != "adb") {
+
 --- a/crates/skyward/src/remember.rs
 +++ b/crates/skyward/src/remember.rs
 @@ -37,15 +37,26 @@
@@ -103,6 +104,7 @@
 +        Err(e) => Err(e).with_context(|| format!("remove {OPTED_OUT}")),
 +    })
  }
+
 --- a/crates/skyward/src/services.rs
 +++ b/crates/skyward/src/services.rs
 @@ -60,11 +60,22 @@
@@ -150,6 +152,7 @@
      }
      Ok(())
  }
+
 --- a/crates/skyward/src/ui.rs
 +++ b/crates/skyward/src/ui.rs
 @@ -906,7 +906,13 @@
@@ -203,6 +206,7 @@
                  }
              }
              Effect::WlanAuto(on) => {
+
 --- a/crates/skyward-net/src/dns.rs
 +++ b/crates/skyward-net/src/dns.rs
 @@ -13,6 +13,11 @@
@@ -233,6 +237,7 @@
      ask_in_turn(host, &servers)
  }
  
+
 --- a/crates/skyward-net/src/github.rs
 +++ b/crates/skyward-net/src/github.rs
 @@ -5,11 +5,9 @@
@@ -250,6 +255,7 @@
  
  /// The version of GitHub's API the answer is read as.
  const API_VERSION: &str = "2022-11-28";
+
 --- a/crates/skyward-ui/src/app/decrypt.rs
 +++ b/crates/skyward-ui/src/app/decrypt.rs
 @@ -86,7 +86,10 @@
@@ -264,6 +270,7 @@
              return;
          }
          // The partition is open, so the decrypt page has done its work: the
+
 --- a/crates/skyward-ui/src/app/draw.rs
 +++ b/crates/skyward-ui/src/app/draw.rs
 @@ -733,7 +733,12 @@
@@ -280,25 +287,18 @@
                  None => {
                      let stops = if frame.hero.is_some() { &widgets::ABOUT_BAR_MASK[..] } else { &widgets::BAR_MASK[..] };
                      widgets::bar_mask(out, t, stops, frame.bg, bar);
+
 --- a/crates/skyward-ui/src/avatar.rs
 +++ b/crates/skyward-ui/src/avatar.rs
-@@ -132,15 +132,46 @@
- /// Where that is absent the settings' own `device_name` is read; where nothing
- /// is kept at all, the caller falls back to the model.
- pub fn device_name(secure: &Path) -> Option<String> {
--    named(secure, b"bluetooth_name").or_else(|| named(secure, b"device_name"))
-+    // Some systems leave a package here instead of a name
-+    // (`com.xiaomi.bluetooth`), so one that reads as a package is passed over.
-+    // The secure file usually holds no `device_name` of its own, and the model
-+    // is kept in the global one.
-+    named(secure, b"bluetooth_name")
-+        .filter(|name| !reads_as_a_package(name))
-+        .or_else(|| named(secure, b"device_name"))
-+        .or_else(|| named(Path::new(GLOBAL_SETTINGS), b"device_name"))
+@@ -140,8 +140,16 @@
+ pub fn device_name(global: &Path, secure: &Path, model: Option<&str>) -> Option<String> {
+     let chosen = named(global, b"device_name").filter(|name| Some(name.as_str()) != model);
+     chosen
+-        .or_else(|| named(secure, b"bluetooth_name"))
+-        .or_else(|| named(secure, b"device_name"))
++        .or_else(|| named(secure, b"bluetooth_name").filter(|name| !reads_as_a_package(name)))
++        .or_else(|| named(secure, b"device_name").filter(|name| !reads_as_a_package(name)))
 +}
-+
-+/// Where the model is kept when the secure file holds no name of its own.
-+const GLOBAL_SETTINGS: &str = "/data/system/users/0/settings_global.xml";
 +
 +/// `com.xiaomi.bluetooth` 这种：全是小写字母、数字与点，且带点，是包名而不是名字。
 +fn reads_as_a_package(name: &str) -> bool {
@@ -309,15 +309,13 @@
  }
  
  /// The string kept after `key` in the settings file at `path`.
- fn named(path: &Path, key: &[u8]) -> Option<String> {
-     let bytes = std::fs::read(path).ok()?;
-     // Each string is a zero, the index it is kept at, a zero, its length, and
--    // its bytes. The name wanted is the one kept just after `key`.
+@@ -157,7 +165,19 @@
+ /// `0x05`。所以别看内容猜 base64，看类型（真机实测 2026-11-24：😀测试 存成
+ /// `2D3eAG1Li9U=`，小米17 与 MyPhoneName1 都是明文）。
+ fn kept(bytes: &[u8], key: &[u8]) -> Option<String> {
 -    let at = bytes.windows(key.len()).position(|w| w == key)? + key.len();
-+    // its bytes. The name wanted is the one kept just after `key` -- but only
-+    // where `key` starts a string: the same bytes turn up inside longer keys,
-+    // such as `easy_tether_device_name_record_connecting`, and reading on from
-+    // there hands back the bytes of some other string.
++    // 只认「从字符串开头起」的 key：同样的字节会出现在更长的键里，比如
++    // `easy_tether_device_name_record_connecting`，从那里往后读会读到别的字符串。
 +    let mut at = None;
 +    let mut from = 0;
 +    while let Some(found) = bytes[from..].windows(key.len()).position(|w| w == key) {
@@ -332,6 +330,7 @@
      let mut i = at;
      // A slash may follow the key, as the phone's own format writes it.
      while i < bytes.len() && bytes[i] == b'/' {
+
 --- a/crates/skyward-ui/src/pages.rs
 +++ b/crates/skyward-ui/src/pages.rs
 @@ -354,7 +354,8 @@
@@ -360,25 +359,3 @@
          Data::Closed | Data::Opening => data_status(
              cx,
              c,
-
---- a/crates/skyward-crypto/src/encryption.rs
-+++ b/crates/skyward-crypto/src/encryption.rs
-@@ -44,9 +44,15 @@
-         }
-         // A table may name only where the key is kept: Android then takes the
-         // cipher it uses where nothing is said, and the key in the form the key
--        // service gives it back.
--        if entry.extra("keydirectory").is_some() {
--            return Ok(Some(Encryption { cipher: "aes-xts-plain64".to_string(), wrapped: false }));
-+        // service gives it back. 但这只在那台机器真把分区整盘加密时成立：
-+        // 本机（nuwa）的 fstab 同样只给了 keydirectory，分区却是裸 f2fs，
-+        // key 目录里什么都没有。所以先看 key 在不在，不在就按没加密处理，
-+        // 否则打开流程会停在 read .../key/version: No such file or directory。
-+        if let Some(dir) = entry.extra("keydirectory") {
-+            let version = Path::new(dir).join(KEY_DIR).join("version");
-+            if version.exists() {
-+                return Ok(Some(Encryption { cipher: "aes-xts-plain64".to_string(), wrapped: false }));
-+            }
-         }
-         Ok(None)
-     }
